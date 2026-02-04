@@ -89,7 +89,10 @@ adj_size = 10000
 num_copies = 1
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--datasets", nargs="+", default=["Wiki-Vote", "soc-Epinions1", "soc-Slashdot0811","p2p-Gnutella31", "web-Google", "road-minnesota", "road-euroroad"])
+parser.add_argument("--datasets", nargs="+", default=["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", 
+        "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", 
+        "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", 
+        "soc-LiveJournal1", "wiki-topcats", "soc-Pokec"])
 args = parser.parse_args()
 
 output_split_dir = "./datasets/data_splits/"

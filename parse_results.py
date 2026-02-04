@@ -92,7 +92,7 @@ def generate_combined_main_table(mean_kt, std_kt, mean_time, std_time):
     our_key = get_algo_name(init=MANUAL_DEGREE_CODE, train=MANUAL_TRAIN_TYPE, 
                             nhid=MANUAL_NHID, layers=MANUAL_LAYERS, dropout=MANUAL_DROPOUT, epochs=MANUAL_EPOCHS)
 
-    keys = ["Original_Murata_SF", "ABCDE_Train", our_key]
+    keys = ["GNN_Bet_SF", "ABCDE_Train", our_key]
     
     print(r"\begin{table*}[t]")
     print(r"\setlength{\tabcolsep}{3pt}")

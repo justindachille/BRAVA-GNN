@@ -3,12 +3,10 @@ import pickle
 import networkx as nx
 import numpy as np
 
-# Define where to save files for ABCDE to read
 ABCDE_DATA_DIR = "./datasets/real"
 if not os.path.exists(ABCDE_DATA_DIR):
     os.makedirs(ABCDE_DATA_DIR)
 
-# List of datasets you want to convert (matching your existing pickles)
 DATASETS = [
     "SF", "HY",
     "web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31",

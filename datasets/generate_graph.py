@@ -17,9 +17,15 @@ def load_real_data(file_path, is_undirected=False):
     # Read file and remap IDs
     with open(file_path, 'r') as file:
         for line in file:
-            if line.startswith('#'):
+            if line.startswith('#') or line.startswith('%'):
                 continue  # Skip comments
-            from_node, to_node = map(int, line.split())
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                from_node, to_node = int(parts[0]), int(parts[1])
+            except ValueError:
+                continue
             
             if from_node not in original_to_new:
                 original_to_new[from_node] = new_id
@@ -171,7 +177,10 @@ def cal_exact_close(g_nx):
 
 print("Load and process data graphs")
 parser = argparse.ArgumentParser()
-parser.add_argument("--datasets", nargs="+", default=["Wiki-Vote", "soc-Epinions1", "web-Google", "soc-Slashdot0811","p2p-Gnutella31", "road-minnesota", "road-euroroad"])
+parser.add_argument("--datasets", nargs="+", default=["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", 
+        "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", 
+        "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", 
+        "soc-LiveJournal1", "wiki-topcats", "soc-Pokec"])
 args = parser.parse_args()
 
 output_dir = "./datasets/graphs/"
@@ -179,7 +188,6 @@ if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 for data in args.datasets:
-    # Check if this is a synthetic graph type
     is_synthetic = data in ["SF", "ER", "GRP"] or data.startswith("HY") or data.startswith("SF_")
     
     if is_synthetic:
@@ -240,34 +248,40 @@ for data in args.datasets:
         print(f"{data} Graphs saved")
         
     else:
-        # Real graph processing
         fname_bet = os.path.join(output_dir, data + "_bet.pickle")
         if os.path.exists(fname_bet):
             print(f"Skipping {data} (output exists at {fname_bet})")
             continue
 
-        # Try Murata path
-        input_path_murata = f"./datasets/real_graph/murata/{data}.txt"
-        input_path_roads = f"./datasets/real_graph/roads/{data}.txt"
+        # Flattened path - no 'murata' or 'roads' subfolders
+        input_path = f"./datasets/real_graph/{data}.txt"
         
-        G = None
-        if os.path.exists(input_path_murata):
-            print(f"Processing {data} (Murata)...")
-            G = load_real_data(input_path_murata)
-        elif os.path.exists(input_path_roads):
-            print(f"Processing {data} (Roads)...")
-            G = load_real_data(input_path_roads, is_undirected=True)
-            if nx.number_of_isolates(G)>0:
-                G.remove_nodes_from(list(nx.isolates(G)))
-                G = nx.convert_node_labels_to_integers(G)
-            components = nx.strongly_connected_components(G)
-            for component in components:
-                print(f'Diameter of component: {data}: D={nx.diameter(G.subgraph(component))})')
-        else:
-            print(f"Warning: Raw data for {data} not found in murata or roads folder")
+        if not os.path.exists(input_path):
+            print(f"Warning: Raw data for {data} not found at {input_path}")
             continue
 
-        if nx.number_of_isolates(G)>0:
+        print(f"Processing {data}...")
+        
+        # Heuristic: Roads are undirected
+        if data.startswith("road-"):
+            print(" -> Treating as Undirected (Road Network)")
+            G = load_real_data(input_path, is_undirected=True)
+            
+            if nx.number_of_isolates(G) > 0:
+                G.remove_nodes_from(list(nx.isolates(G)))
+                G = nx.convert_node_labels_to_integers(G)
+                
+            # Optional: Print diameter of components for checking
+            components = nx.strongly_connected_components(G)
+            for i, component in enumerate(components):
+                if i > 5: break # Don't print too many
+                # Calculating diameter is expensive, skip for speed unless debugging
+                pass
+        else:
+            print(" -> Treating as Directed")
+            G = load_real_data(input_path, is_undirected=False)
+
+        if nx.number_of_isolates(G) > 0:
             G.remove_nodes_from(list(nx.isolates(G)))
             G = nx.convert_node_labels_to_integers(G)
         g_nkit = nx2nkit(G)

@@ -299,10 +299,10 @@ ABCDE_Train_S2,620.1868
 ABCDE_Train_S4,609.3994
 ABCDE_Train_S3,1860.5952
 ABCDE_Train_S5,858.5958
-Original_Murata_SF_S2,10122.7647
-Original_Murata_SF_S1,20212.5088
-Original_Murata_SF_S3,36318.9525
-Original_Murata_SF_S4,36458.0063
+GNN_Bet_SF_S2,10122.7647
+GNN_Bet_SF_S1,20212.5088
+GNN_Bet_SF_S3,36318.9525
+GNN_Bet_SF_S4,36458.0063
 ABCDE_Train_S1,492.4945
 baseline_degree_mix_sum_SF_10_HY_10_2_12_L6_S1,827.5415
 baseline_degree_mix_sum_SF_10_HY_10_2_12_L7_S1,865.5994
@@ -329,7 +329,7 @@ baseline_degree_mix_sum_SF_10_HY_10_2_12_L10_S5,993.0137
 baseline_degree_mix_sum_SF_10_HY_10_2_12_L9_S5,951.7429
 baseline_degree_mix_sum_SF_10_HY_10_2_12_L10_S2,1806.3141
 baseline_degree_mix_sum_SF_10_HY_10_2_12_L10_S3,381.8566
-Original_Murata_SF_S5,63352.5106
+GNN_Bet_SF_S5,63352.5106
 baseline_degree_mix_mass_4_SF_10_HY_10_2_12_L2_S3,243.2553
 baseline_degree_mix_mass_4_SF_10_HY_10_2_12_L2_S1,372.6572
 baseline_degree_mix_mass_4_SF_10_HY_10_2_12_L2_S2,345.7494

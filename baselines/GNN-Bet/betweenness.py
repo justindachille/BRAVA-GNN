@@ -219,7 +219,7 @@ for data in TEST_GRAPHS:
 print("\n" + "="*30)
 print("Writing results to all_results.csv")
 print("="*30)
-alg_name = f"Original_Murata_{gtype}_S{args.seed}"
+alg_name = f"GNN_Bet_{gtype}_S{args.seed}"
 header = "Algorithm," + ",".join(TEST_GRAPHS)
 
 results_str = [alg_name]
