@@ -29,7 +29,7 @@ python baselines/convert_abcde.py
 
 ```bash
 # Final model hyperparameters
-python betweenness.py --mode baseline --init_type degree_mix_mass_6 --num_layers 2 --nhid 12 --dropout 0.3 --train_type SF_10_HY_10_2 --seed 1 --run_all_tests
+python betweenness.py --init_type degree_mix_mass_6 --num_layers 2 --nhid 12 --dropout 0.3 --train_type SF_10_HY_10_2 --seed 1 --run_all_tests
 ```
 *   `--run_all_tests` will test on entire test suite, instead of a small subset.
 *   `--train_type` trains on a mix of 10 Scale-Free and 10 Hyperbolic graphs.

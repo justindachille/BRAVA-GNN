@@ -17,8 +17,6 @@ import time
 import scipy.sparse as sp
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mode", default="baseline", choices=["baseline", "repeats", "more_layers"], help="Model architecture mode")
-parser.add_argument("--repeats", type=int, default=1, help="Number of repeats for layers or number of layers in 'more_layers' mode")
 parser.add_argument("--init_type", default="AW", help="Initialization type: AW, degree, degree0, degree1, degree2, degree3, degree_embedding")
 parser.add_argument("--train_type", default="SF", help="Train on SF or HY graphs (e.g., HY_10, HY_50, SF_HY, SF_HY_160)")
 parser.add_argument("--leverage", action="store_true", help="Include Leverage Centrality in node initialization")
@@ -103,6 +101,8 @@ def wait_for_file(filepath):
         time.sleep(5)
 
 gtype = args.train_type
+args.mode = 'baseline'
+args.repeats = 1
 print(f'Training on {gtype} | Mode: {args.mode} | Repeats: {args.repeats} | Init: {args.init_type} | Lev: {args.leverage} | LCC: {args.lcc} | Nhid: {args.nhid} | TopK: {args.top_k}')
 print(f"Normalization: {args.normalize} | Accumulation Steps: {args.accumulate} | Layers: {args.num_layers} | Seed: {args.seed} | Dropout: {args.dropout} | Epochs: {args.epochs}")
 
