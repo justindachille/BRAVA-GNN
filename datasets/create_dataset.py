@@ -84,8 +84,6 @@ def get_split(source_file,num_train,num_test,num_copies,adj_size,save_path):
 
 #creating training/test dataset split for the model
 adj_size = 10000
-#Number of permutations for node sequence
-#Can be raised higher to get more training graphs
 num_copies = 1
 
 parser = argparse.ArgumentParser()
@@ -100,14 +98,12 @@ if not os.path.exists(output_split_dir):
     os.makedirs(output_split_dir)
 
 for data in args.datasets:
-    # Check if synthetic
     is_synthetic = data in ["SF", "ER", "GRP"] or data.startswith("HY") or data.startswith("SF_")
     
     if is_synthetic:
         print(f"Processing {data}...")
         bet_source_file = "./datasets/graphs/"+ data + "_data_bet.pickle"
 
-        #paths for saving splits
         save_path_bet = "./datasets/data_splits/"+data+"/betweenness/"
         if not os.path.exists(save_path_bet): os.makedirs(save_path_bet)
 
@@ -115,7 +111,6 @@ for data in args.datasets:
             print(f"Skipping {data} splits (exist)")
             continue
 
-        # Determine split based on type
         cur_num_train = 5
         cur_num_test = 0
 
@@ -125,12 +120,10 @@ for data in args.datasets:
             except:
                 pass
         
-        #save betweenness split
         get_split(bet_source_file,cur_num_train,cur_num_test,num_copies,adj_size,save_path_bet)
         print(f" {data} Data split saved.")
         
     else:
-        # Real graph logic
         source_file = "./datasets/graphs/"+data+"_bet.pickle"
         if not os.path.exists(source_file):
             print(f"Warning: Source {source_file} not found")

@@ -22,7 +22,6 @@ def get_out_edges(g_nkit,node_sequence):
             
     return all_out_dict
 
-
 def get_in_edges(g_nkit,node_sequence):
     global all_in_dict
     all_in_dict = dict()
@@ -34,17 +33,13 @@ def get_in_edges(g_nkit,node_sequence):
             
     return all_in_dict
 
-
 def nkit_inedges(u,v,weight,edgeid):
     all_in_dict[u].add(v)
-
 
 def nkit_outedges(u,v,weight,edgeid):
     all_out_dict[u].add(v)
 
-
 def nx2nkit(g_nx):
-    
     node_num = g_nx.number_of_nodes()
     g_nkit = Graph(directed=True)
     
@@ -58,7 +53,6 @@ def nx2nkit(g_nx):
     assert g_nx.number_of_edges()==g_nkit.numberOfEdges(),"Number of edges not matching"
         
     return g_nkit
-
 
 def clique_check(index,node_sequence,all_out_dict,all_in_dict):
     node = node_sequence[index]
@@ -83,10 +77,7 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
 
-
 def graph_to_adj_bet(list_graph,list_n_sequence,list_node_num,model_size, init_type="AW", nhid=0):
-    
-
     list_adjacency = list()
     list_adjacency_t = list()
     list_degree = list()
@@ -102,7 +93,6 @@ def graph_to_adj_bet(list_graph,list_n_sequence,list_node_num,model_size, init_t
         graph = nx.MultiDiGraph()
         graph.add_edges_from(edges)
 
-        #self_loops = [i for i in graph.selfloop_edges()]
         self_loops = list(nx.selfloop_edges(graph))
         graph.remove_edges_from(self_loops)
         node_sequence = list_n_sequence[i]
@@ -116,7 +106,6 @@ def graph_to_adj_bet(list_graph,list_n_sequence,list_node_num,model_size, init_t
         arr_temp1 = np.sum(adj_temp,axis=1)
         arr_temp2 = np.sum(adj_temp_t,axis=1)
         
-
         arr_multi = np.multiply(arr_temp1,arr_temp2)
         
         arr_multi = np.where(arr_multi>0,1.0,0.0)
@@ -154,8 +143,6 @@ def graph_to_adj_bet(list_graph,list_n_sequence,list_node_num,model_size, init_t
     return list_adjacency,list_adjacency_t
 
 def graph_to_adj_close(list_graph,list_n_sequence,list_node_num,model_size,print_time=False):
-    
-
     list_adjacency = list()
     list_adjacency_mod = list()
     list_degree = list()
@@ -244,10 +231,6 @@ def ranking_correlation(y_out,true_val,node_num,model_size):
     return kt
 
 def ranking_correlation_topk(y_out,true_val,node_num,model_size):
-    """
-    Returns Kendall-Tau and Top-K intersection accuracy for 1%, 5%, 10%.
-    Non-destructive alternative to ranking_correlation.
-    """
     y_out = y_out.reshape(-1)
     true_val = true_val.reshape(-1)
 

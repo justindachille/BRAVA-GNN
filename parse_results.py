@@ -48,10 +48,6 @@ def load_and_aggregate(filepath):
     return mean_df, std_df
 
 def get_algo_name(init="degree_mix_sum", train="SF_10_HY_10_2", nhid=12, layers=4, dropout=0.6, epochs=10):
-    """
-    Reconstructs the algorithm string used in the CSV.
-    Matches logic in betweenness.py
-    """
     name = f"baseline_{init}_{train}_{nhid}"
     
     if layers != 4:

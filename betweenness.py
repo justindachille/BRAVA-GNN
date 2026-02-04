@@ -53,29 +53,17 @@ elif args.train_type.startswith("HY"):
 elif args.train_type.startswith("SF_"):
     TRAIN_GRAPHS = [args.train_type]
 
-# TEST_GRAPHS = ["wiki_vote", "web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", "road-minnesota", "road-euroroad"]
-TEST_GRAPHS = ["road-belgium-osm", "road-roadNet-CA", "amazon", "cit-Patents", "com-lj"]
 TEST_GRAPHS = ["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", \
     "email-EuAll", "wiki-Talk", \
     "soc-LiveJournal1", "cit-Patents", "wiki-topcats", "soc-Pokec", \
     "amazon", "com-lj", "com-youtube", "dblp"] 
 
 if args.run_all_tests:
-    # TEST_GRAPHS = ["wiki_vote", "web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", "road-minnesota", \
-                # "road-euroroad", "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", "p2p-Gnutella05"]
-    # TEST_GRAPHS = ["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", \
-        # "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", \
-        # "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", \
-        # "soc-LiveJournal1", "cit-Patents", "wiki-topcats", "soc-Pokec"]
-
     TEST_GRAPHS = ["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", \
         "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", \
         "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", \
         "soc-LiveJournal1", "cit-Patents", "wiki-topcats", "soc-Pokec", \
         "amazon", "com-lj", "com-youtube", "dblp"] 
-        # "road-italy-osm"
-# TRAIN_GRAPHS = ["HY"]
-# TEST_GRAPHS = ["road-euroroad", "wiki_vote", "road-minnesota", "soc-Epinions1"]
 
 def is_synthetic(g):
     return g in ["SF", "ER", "GRP"] or g.startswith("HY") or g.startswith("SF_")
@@ -85,7 +73,6 @@ def check_and_generate(train_graphs, test_graphs):
     
     for g in set(train_graphs + test_graphs):
         if is_synthetic(g):
-            # Check for splits (training check is sufficient for existence)
             if not os.path.exists(f"./datasets/data_splits/{g}/betweenness/training.pickle"):
                 needed_gen.append(g)
         else:
@@ -113,23 +100,15 @@ def wait_for_file(filepath):
         while not os.path.exists(filepath):
             time.sleep(30)
         print(f"Found {filepath}. Resuming.")
-        # Give it a few extra seconds to ensure write completion
         time.sleep(5)
 
-TURN_MODEL_PICKLING_OFF = True
-
-# parser = argparse.ArgumentParser()
-# parser.add_argument("--g",default="SF")
-# args = parser.parse_args()
-# gtype = args.g
 gtype = args.train_type
 print(f'Training on {gtype} | Mode: {args.mode} | Repeats: {args.repeats} | Init: {args.init_type} | Lev: {args.leverage} | LCC: {args.lcc} | Nhid: {args.nhid} | TopK: {args.top_k}')
 print(f"Normalization: {args.normalize} | Accumulation Steps: {args.accumulate} | Layers: {args.num_layers} | Seed: {args.seed} | Dropout: {args.dropout} | Epochs: {args.epochs}")
 
-#Load training data
 print(f"Loading data...")
 list_graph_train, list_n_seq_train, list_num_node_train = [], [], []
-bc_mat_train = [] # Changed to list of arrays to handle dynamic sizes
+bc_mat_train = [] 
 
 latest_mtime = 0
 
@@ -147,20 +126,15 @@ for g in TRAIN_GRAPHS:
         latest_mtime = max(latest_mtime, os.path.getmtime(path))
         with open(path,"rb") as fopen:
             data = pickle.load(fopen)
-            # data structure: [list_graph, list_n_seq, list_node_num, cent_mat]
             list_graph_train.extend(data[0])
             list_n_seq_train.extend(data[1])
             list_num_node_train.extend(data[2])
             
-            # Process centrality matrix
-            # cent_mat is (max_nodes, num_samples)
-            # We convert this to a list of 1D arrays, slicing only the valid nodes
             cent_mat_chunk = data[3]
             nodes_in_chunk = data[2]
             
             for k in range(cent_mat_chunk.shape[1]):
                 valid_count = nodes_in_chunk[k]
-                # Slice exactly valid_count to allow dynamic mixing without padding errors
                 bc_mat_train.append(cent_mat_chunk[:valid_count, k])
 
 unique_indices = []
@@ -194,7 +168,6 @@ for g in TEST_GRAPHS:
         latest_mtime = max(latest_mtime, os.path.getmtime(path))
         with open(path,"rb") as fopen:
             d = pickle.load(fopen)
-            # Convert matrix to list of arrays for test data as well
             c_mat = d[3]
             l_nodes = d[2]
             c_list = [c_mat[:l_nodes[k], k] for k in range(c_mat.shape[1])]
@@ -203,11 +176,9 @@ for g in TEST_GRAPHS:
     else:
         print(f'dataset {g} not found at {path}, skipping')
 
-# Determine model size (max nodes encountered) for initialization
 max_train_size = max(list_num_node_train) if list_num_node_train else 0
 max_test_size = 0
 for key in test_data_dict:
-    # test_data_dict[key][2] is list_num_node
     if test_data_dict[key][2]:
         max_test_size = max(max_test_size, max(test_data_dict[key][2]))
 
@@ -218,9 +189,7 @@ print(f"Model initialized with size: {model_size}")
 
 if not os.path.exists("pickles"): os.makedirs("pickles")
 
-# Prepare validation set (use first available test graph for monitoring)
 val_idx = 0
-# val_idx = 8
 val_key = TEST_GRAPHS[val_idx] if (len(TEST_GRAPHS) > val_idx and TEST_GRAPHS[val_idx] in test_data_dict) else None
 if val_key:
     list_graph_val, list_n_seq_val, list_num_node_val, bc_mat_val = test_data_dict[val_key]
@@ -289,13 +258,11 @@ def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, m
             y_out = model(batch_adj, batch_adj_t)
             loss = loss_cal(y_out, batch_true_val, node_num, device, model_size)
             
-            # Normalize loss for accumulation
             if accum_steps > 1:
                 loss = loss / accum_steps
             
             loss.backward()
             
-            # Update step logic: accumulate gradients until accum_steps is reached
             if (i + 1) % accum_steps == 0 or (i + 1) == len(indices):
                 optimizer.step()
                 optimizer.zero_grad()
@@ -305,7 +272,6 @@ def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test, model_
     list_kt = list()
     total_inference_time = 0
     
-    # Store lists for topk
     topk_lists = collections.defaultdict(list)
 
     num_samples_test = len(list_adj_test)
@@ -318,7 +284,6 @@ def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test, model_
         
         num_nodes = list_num_node_test[j]
         
-        # Timing Inference
         if torch.cuda.is_available(): torch.cuda.synchronize()
         start = time.time()
         y_out = model(adj_tensor, adj_t_tensor)
@@ -335,7 +300,6 @@ def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test, model_
             for p, acc in topk_dict.items():
                 topk_lists[p].append(acc)
         else:
-            # Use simpler basic function if Top-K not requested
             kt = ranking_correlation(y_out, true_val, num_nodes, model_size)
             list_kt.append(kt)
 
@@ -370,10 +334,10 @@ optimizer = torch.optim.Adam(model.parameters(),lr=0.005)
 num_epoch = args.epochs
 
 print("Training")
-print(f"Total Number of epoches: {num_epoch}")
+print(f"Total Number of epochs: {num_epoch}")
 
 PICKLE_FILEPATH = f"pickles/between_network_{args.mode}_{args.repeats}_{args.init_type}_lev{args.leverage}_lcc{args.lcc}_hid{args.nhid}_norm{args.normalize}_accum{args.accumulate}_lay{args.num_layers}_ep{args.epochs}_seed{args.seed}_drop{args.dropout}.pickle"
-if os.path.exists(PICKLE_FILEPATH) and not TURN_MODEL_PICKLING_OFF:
+if os.path.exists(PICKLE_FILEPATH):
     print("Loading network pickle...")
     model.load_state_dict(torch.load(PICKLE_FILEPATH))
 else:
@@ -382,7 +346,6 @@ else:
         print(f"Epoch number: {e+1}/{num_epoch}")
         train(list_adj_train,list_adj_t_train,list_num_node_train,bc_mat_train,model_size, args.accumulate)
 
-        #to check test loss while training
         with torch.no_grad():
             test(list_adj_val,list_adj_t_val,list_num_node_val,bc_mat_val,model_size)
     training_end_time = time.time()
@@ -404,7 +367,6 @@ for data_name in TEST_GRAPHS:
         if args.top_k:
             topk_scores_per_dataset[data_name] = topk_means
 
-# Generate CSV output for spreadsheet
 print("\n" + "="*30)
 print("SPREADSHEET DATA (Copy & Paste)")
 print("="*30)
@@ -414,7 +376,6 @@ if args.accumulate > 1: alg_name += f"_accum{args.accumulate}"
 if args.num_layers != 4: alg_name += f"_L{args.num_layers}"
 if abs(args.dropout - 0.6) > 1e-6: alg_name += f"_drop{args.dropout}"
 if args.epochs != 10: alg_name += f"_E{args.epochs}"
-# Append seed for differentiation
 alg_name += f"_S{args.seed}"
 
 header = "Algorithm," + ",".join(TEST_GRAPHS)

@@ -14,11 +14,10 @@ def load_real_data(file_path, is_undirected=False):
     new_id = 0
     edges = []
     
-    # Read file and remap IDs
     with open(file_path, 'r') as file:
         for line in file:
             if line.startswith('#') or line.startswith('%'):
-                continue  # Skip comments
+                continue 
             parts = line.split()
             if len(parts) < 2:
                 continue
@@ -39,7 +38,6 @@ def load_real_data(file_path, is_undirected=False):
             if is_undirected:
                 edges.append((original_to_new[to_node], original_to_new[from_node]))
     
-    # Create graph
     G = nx.DiGraph()
     G.add_edges_from(edges)
     
@@ -86,7 +84,6 @@ def create_graph(graph_type, idx=0):
         mode = 2
         
         parts = graph_type.split('_')
-        # Check for suffix like HY_10_0, HY_10_1, etc.
         if len(parts) >= 3 and parts[-1].isdigit():
              mode = int(parts[-1])
         
@@ -128,7 +125,7 @@ def create_graph(graph_type, idx=0):
             gamma = max(2.1, gamma)
             T = np.random.uniform(0, 0.5)
         
-        print(f" [DEBUG] HY Params (Mode {mode}): k={k:.4f}, gamma={gamma:.4f}, T={T:.4f}")
+        print(f"HY Params (Mode {mode}): k={k:.4f}, gamma={gamma:.4f}, T={T:.4f}")
         hg = generators.HyperbolicGenerator(num_nodes, k, gamma, T)
         hgG = hg.generate()
         return nkit2nx(hgG)
@@ -196,7 +193,6 @@ for data in args.datasets:
             print(f"Skipping {data} (exists)")
             continue
         
-        # Determine number of graphs to generate
         if data.startswith("HY_") or data.startswith("SF_"):
             try:
                 num_of_graphs = int(data.split("_")[1])
@@ -253,7 +249,6 @@ for data in args.datasets:
             print(f"Skipping {data} (output exists at {fname_bet})")
             continue
 
-        # Flattened path - no 'murata' or 'roads' subfolders
         input_path = f"./datasets/real_graph/{data}.txt"
         
         if not os.path.exists(input_path):
@@ -262,7 +257,6 @@ for data in args.datasets:
 
         print(f"Processing {data}...")
         
-        # Heuristic: Roads are undirected
         if data.startswith("road-"):
             print(" -> Treating as Undirected (Road Network)")
             G = load_real_data(input_path, is_undirected=True)
@@ -271,11 +265,9 @@ for data in args.datasets:
                 G.remove_nodes_from(list(nx.isolates(G)))
                 G = nx.convert_node_labels_to_integers(G)
                 
-            # Optional: Print diameter of components for checking
             components = nx.strongly_connected_components(G)
             for i, component in enumerate(components):
-                if i > 5: break # Don't print too many
-                # Calculating diameter is expensive, skip for speed unless debugging
+                if i > 5: break 
                 pass
         else:
             print(" -> Treating as Directed")
