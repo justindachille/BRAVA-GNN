@@ -15,6 +15,15 @@ To download and process the main datasets automatically:
 ```bash
 bash datasets/download_datasets.sh
 ```
+Then, import/convert datasets for [ABCDE](https://github.com/MartinXPN/abcde/tree/main):
+```bash
+wget https://github.com/MartinXPN/abcde/releases/download/v1.0.0/real.zip
+unzip real.zip && rm real.zip
+mv real/* datasets/real_graph/
+rmdir real
+
+python baselines/convert_abcde.py
+```
 
 ### Running the model code
 
@@ -26,13 +35,6 @@ python betweenness.py --mode baseline --init_type degree_mix_mass_6 --num_layers
 *   `--train_type` trains on a mix of 10 Scale-Free and 10 Hyperbolic graphs.
 
 ### ABCDE Baseline
-
-To import/convert datasets for [ABCDE](https://github.com/MartinXPN/abcde/tree/main) format:
-```bash
-wget https://github.com/MartinXPN/abcde/releases/download/v1.0.0/real.zip
-unzip real.zip && rm real.zip
-python baselines/convert_abcde.py
-```
 
 To download ABCDE model:
 ```bash
