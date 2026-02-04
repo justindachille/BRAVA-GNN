@@ -1,13 +1,13 @@
 # BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network
 
-### Setup & Requirements
+## Setup
 
 To install dependencies and activate the virtual environment (using `uv`):
 ```bash
 . setup.sh
 ```
 
-### Dataset Details
+## Dataset Details
 
 All datasets are sourced from [SNAP](https://snap.stanford.edu/data/) or [Network Repository](https://networkrepository.com/).
 
@@ -25,7 +25,7 @@ rmdir real
 python baselines/convert_abcde.py
 ```
 
-### Running the model code
+## Running the model code
 
 ```bash
 # Final model hyperparameters
@@ -34,7 +34,7 @@ python betweenness.py --mode baseline --init_type degree_mix_mass_6 --num_layers
 *   `--run_all_tests` will test on entire test suite, instead of a small subset.
 *   `--train_type` trains on a mix of 10 Scale-Free and 10 Hyperbolic graphs.
 
-### ABCDE Baseline
+## ABCDE Baseline
 
 To download ABCDE model:
 ```bash
@@ -47,13 +47,13 @@ To run the ABCDE experiment:
 python baselines/run_abcde.py --seed 1
 ```
 
-### GNN-Bet Baseline
+## GNN-Bet Baseline
 
 ```bash
 python GNN-Bet/betweenness.py --g SF
 ```
 
-### Results
+## Results
 
 Results are automatically appended to CSV files in the `results/` directory:
 *   `results/all_results.csv`: Kendall Tau correlation scores.
