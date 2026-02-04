@@ -1,22 +1,22 @@
-# Code repository for GNN_Ranking
+# BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network
 
-**Setup & Requirements**
+### Setup & Requirements
 
 To install dependencies and activate the virtual environment (using `uv`):
 ```bash
 . setup.sh
 ```
 
-**Dataset Details**
+### Dataset Details
 
 All datasets are sourced from [SNAP](https://snap.stanford.edu/data/) or [Network Repository](https://networkrepository.com/).
 
 To download and process the main datasets automatically:
 ```bash
-bash download_datasets.sh
+bash datasets/download_datasets.sh
 ```
 
-**Running the model code**
+### Running the model code
 
 ```bash
 # Final model hyperparameters
@@ -45,14 +45,20 @@ To run the ABCDE experiment:
 python baselines/run_abcde.py --seed 1
 ```
 
-**Results**
+### GNN-Bet Baseline
+
+```bash
+python GNN-Bet/betweenness.py --g SF
+```
+
+### Results
 
 Results are automatically appended to CSV files in the `results/` directory:
 *   `results/all_results.csv`: Kendall Tau correlation scores.
 *   `results/all_results_topk.csv`: Detailed Top-K accuracy metrics.
 *   `results/all_results_wallclock.csv`: Inference time measurements.
 
-The following command will generate the LaTeX tables used in the paper. To generate a specific table, use `--table main` for the main results and `--table 1–6` for the ablation studies.
+The following command will generate all LaTeX tables used in the paper from the results folder. To generate a specific table, use `--table main` for the main results and `--table 1–6` for the ablation studies.
 
 ```bash
 python parse_results.py
