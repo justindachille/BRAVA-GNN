@@ -4,7 +4,7 @@
 
 To install dependencies and activate the virtual environment (using `uv`):
 ```bash
-. setup.sh
+source setup.sh
 ```
 
 ### Dataset Details
@@ -30,6 +30,8 @@ python betweenness.py --mode baseline --init_type degree_mix_mass_6 --num_layers
 To import/convert datasets for [ABCDE](https://github.com/MartinXPN/abcde/tree/main) format:
 ```bash
 wget https://github.com/MartinXPN/abcde/releases/download/v1.0.0/real.zip
+# Or using curl for macos:
+# curl -L -O https://github.com/MartinXPN/abcde/releases/download/v1.0.0/best.ckpt
 unzip real.zip && rm real.zip
 python baselines/convert_abcde.py
 ```
