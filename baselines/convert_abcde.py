@@ -2,6 +2,8 @@ import os
 import pickle
 import networkx as nx
 import numpy as np
+import sys
+import subprocess
 
 ABCDE_DATA_DIR = "./datasets/real"
 if not os.path.exists(ABCDE_DATA_DIR):
@@ -74,4 +76,7 @@ def load_and_convert():
             print(f"Error converting {name}: {e}")
 
 if __name__ == "__main__":
+    print("Ensuring datasets are generated...")
+    subprocess.check_call([sys.executable, "datasets/generate_graph.py", "--datasets"] + DATASETS)
+    subprocess.check_call([sys.executable, "datasets/create_dataset.py", "--datasets"] + DATASETS)
     load_and_convert()

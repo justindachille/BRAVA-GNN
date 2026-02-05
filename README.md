@@ -1,13 +1,13 @@
 # BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network
 
-### Setup & Requirements
+## Setup
 
 To install dependencies and activate the virtual environment (using `uv`):
 ```bash
 source setup.sh
 ```
 
-### Dataset Details
+## Dataset Details
 
 All datasets are sourced from [SNAP](https://snap.stanford.edu/data/) or [Network Repository](https://networkrepository.com/).
 
@@ -15,12 +15,21 @@ To download and process the main datasets automatically:
 ```bash
 bash datasets/download_datasets.sh
 ```
+Then, import/convert datasets for [ABCDE](https://github.com/MartinXPN/abcde/tree/main):
+```bash
+wget https://github.com/MartinXPN/abcde/releases/download/v1.0.0/real.zip
+unzip real.zip && rm real.zip
+mv real/* datasets/real_graph/
+rmdir real
 
-### Running the model code
+python baselines/convert_abcde.py
+```
+
+## Running the model code
 
 ```bash
 # Final model hyperparameters
-python betweenness.py --mode baseline --init_type degree_mix_mass_6 --num_layers 2 --nhid 12 --dropout 0.3 --train_type SF_10_HY_10_2 --seed 1 --run_all_tests
+python betweenness.py --init_type degree_mix_mass_6 --num_layers 2 --nhid 12 --dropout 0.3 --train_type SF_10_HY_10_2 --seed 1 --run_all_tests
 ```
 *   `--run_all_tests` will test on entire test suite, instead of a small subset.
 *   `--train_type` trains on a mix of 10 Scale-Free and 10 Hyperbolic graphs.
@@ -47,13 +56,13 @@ To run the ABCDE experiment:
 python baselines/run_abcde.py --seed 1
 ```
 
-### GNN-Bet Baseline
+## GNN-Bet Baseline
 
 ```bash
 python GNN-Bet/betweenness.py --g SF
 ```
 
-### Results
+## Results
 
 Results are automatically appended to CSV files in the `results/` directory:
 *   `results/all_results.csv`: Kendall Tau correlation scores.
