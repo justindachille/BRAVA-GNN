@@ -6,16 +6,14 @@ from layer import MLP
 import torch
 
 class GNN_Bet(nn.Module):
-    def __init__(self, ninput, nhid, dropout, mode="baseline", repeats=1, init_type="AW", leverage=False, lcc=False, normalize=False, num_layers=4):
+    def __init__(self, ninput, nhid, dropout, init_type="AW", num_layers=4):
         super(GNN_Bet, self).__init__()
         
-        self.mode = mode
-        self.repeats = repeats
         self.dropout = dropout
         self.num_layers = num_layers
         self.score_layer = MLP(nhid, self.dropout)
 
-        self.gc1 = GNN_Layer_Init(ninput,nhid, init_type=init_type, leverage=leverage, lcc=lcc, normalize=normalize)
+        self.gc1 = GNN_Layer_Init(ninput,nhid, init_type=init_type)
 
         self.layers = nn.ModuleList([GNN_Layer(nhid,nhid) for _ in range(self.num_layers)])
 

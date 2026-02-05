@@ -17,16 +17,12 @@ import time
 import scipy.sparse as sp
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--init_type", default="AW", help="Initialization type: AW, degree, degree0, degree1, degree2, degree3, degree_embedding")
+parser.add_argument("--init_type", default="AW", help="Initialization type: AW, degree, degree0, degree1, degree2, degree3")
 parser.add_argument("--train_type", default="SF", help="Train on SF or HY graphs (e.g., HY_10, HY_50, SF_HY, SF_HY_160)")
-parser.add_argument("--leverage", action="store_true", help="Include Leverage Centrality in node initialization")
-parser.add_argument("--lcc", action="store_true", help="Include Local Clustering Coefficient in node initialization")
 parser.add_argument("--run_all_tests", action="store_true", help="Whether to run full test suite")
 parser.add_argument("--nhid", type=int, default=12, help="Number of hidden parameters")
 parser.add_argument("--num_layers", type=int, default=4, help="Number of layers for baseline mode")
 parser.add_argument("--skip_gen", action="store_true", help="Skip graph generation and wait for files to appear")
-parser.add_argument("--top_k", action="store_true", help="Calculate and log Top-K accuracy metrics")
-parser.add_argument("--normalize", action="store_true", help="Normalize input features by graph max to [0,1]")
 parser.add_argument("--accumulate", type=int, default=1, help="Number of steps for gradient accumulation")
 parser.add_argument("--seed", type=int, default=20, help="Random seed")
 parser.add_argument("--dropout", type=float, default=0.3, help="Dropout rate (default: 0.3)")
@@ -101,10 +97,8 @@ def wait_for_file(filepath):
         time.sleep(5)
 
 gtype = args.train_type
-args.mode = 'baseline'
-args.repeats = 1
-print(f'Training on {gtype} | Mode: {args.mode} | Repeats: {args.repeats} | Init: {args.init_type} | Lev: {args.leverage} | LCC: {args.lcc} | Nhid: {args.nhid} | TopK: {args.top_k}')
-print(f"Normalization: {args.normalize} | Accumulation Steps: {args.accumulate} | Layers: {args.num_layers} | Seed: {args.seed} | Dropout: {args.dropout} | Epochs: {args.epochs}")
+print(f'Training on {gtype} | Init: {args.init_type} | Nhid: {args.nhid}')
+print(f"Accumulation Steps: {args.accumulate} | Layers: {args.num_layers} | Seed: {args.seed} | Dropout: {args.dropout} | Epochs: {args.epochs}")
 
 print(f"Loading data...")
 list_graph_train, list_n_seq_train, list_num_node_train = [], [], []
@@ -176,16 +170,6 @@ for g in TEST_GRAPHS:
     else:
         print(f'dataset {g} not found at {path}, skipping')
 
-max_train_size = max(list_num_node_train) if list_num_node_train else 0
-max_test_size = 0
-for key in test_data_dict:
-    if test_data_dict[key][2]:
-        max_test_size = max(max_test_size, max(test_data_dict[key][2]))
-
-model_size = max(max_train_size, max_test_size)
-
-print(f"Global Max Nodes: {model_size} (Train: {max_train_size}, Test Max: {max_test_size})")
-print(f"Model initialized with size: {model_size}")
 
 if not os.path.exists("pickles"): os.makedirs("pickles")
 
@@ -197,7 +181,7 @@ if val_key:
 else:
     list_graph_val, list_n_seq_val, list_num_node_val, bc_mat_val = [], [], [], []
 
-adj_cache_path = f"pickles/adj_data_scipy_{gtype}_{model_size}_{val_key}.pickle"
+adj_cache_path = f"pickles/adj_data_scipy_{gtype}_{val_key}.pickle"
 lock_path = adj_cache_path + ".lock"
 with open(lock_path, "w") as lock_file:
     print(f"Acquiring lock for adjacency conversion: {adj_cache_path}")
@@ -211,8 +195,8 @@ with open(lock_path, "w") as lock_file:
             list_adj_train, list_adj_t_train, list_adj_val, list_adj_t_val = pickle.load(f)
     else:
         print(f"No valid cache found. Starting Graphs to adjacency conversion (Scipy Sparse).")
-        list_adj_train, list_adj_t_train = graph_to_adj_bet(list_graph_train, list_n_seq_train, list_num_node_train, model_size)
-        list_adj_val, list_adj_t_val = graph_to_adj_bet(list_graph_val, list_n_seq_val, list_num_node_val, model_size)
+        list_adj_train, list_adj_t_train = graph_to_adj_bet(list_graph_train, list_n_seq_train, list_num_node_train)
+        list_adj_val, list_adj_t_val = graph_to_adj_bet(list_graph_val, list_n_seq_val, list_num_node_val)
         
         with open(adj_cache_path, "wb") as f:
             pickle.dump([list_adj_train, list_adj_t_train, list_adj_val, list_adj_t_val], f)
@@ -220,7 +204,7 @@ with open(lock_path, "w") as lock_file:
     fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, model_size, accum_steps=1):
+def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, accum_steps=1):
     model.train()
     
     gpu_graphs = []
@@ -256,7 +240,7 @@ def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, m
             batch_adj_t = permute_adj(adj_t, inv_perm, node_num)
             
             y_out = model(batch_adj, batch_adj_t)
-            loss = loss_cal(y_out, batch_true_val, node_num, device, model_size)
+            loss = loss_cal(y_out, batch_true_val, node_num, device)
             
             if accum_steps > 1:
                 loss = loss / accum_steps
@@ -267,13 +251,11 @@ def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, m
                 optimizer.step()
                 optimizer.zero_grad()
 
-def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test, model_size):
+def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test):
     model.eval()
     list_kt = list()
     total_inference_time = 0
     
-    topk_lists = collections.defaultdict(list)
-
     num_samples_test = len(list_adj_test)
     for j in range(num_samples_test):
         adj_sparse = list_adj_test[j]
@@ -294,37 +276,24 @@ def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test, model_
         true_arr = torch.from_numpy(bc_mat_test[j]).float()
         true_val = true_arr.to(device)
     
-        if args.top_k:
-            kt, topk_dict = ranking_correlation_topk(y_out, true_val, num_nodes, model_size)
-            list_kt.append(kt)
-            for p, acc in topk_dict.items():
-                topk_lists[p].append(acc)
-        else:
-            kt = ranking_correlation(y_out, true_val, num_nodes, model_size)
-            list_kt.append(kt)
+        kt = ranking_correlation(y_out, true_val, num_nodes)
+        list_kt.append(kt)
 
     mean_kt_score = np.mean(np.array(list_kt))
     std_kt_score = np.std(np.array(list_kt))
     avg_inference_time = total_inference_time / num_samples_test
     
-    topk_means = {}
-    if args.top_k:
-        topk_means = {p: np.mean(vals) for p, vals in topk_lists.items()}
-
     print(f"   Average KT score on test graphs is: {mean_kt_score:.4f} and std: {std_kt_score:.4f}")
-    if args.top_k:
-        print(f"   Top 1%: {topk_means.get(0.01, 0):.4f} | Top 5%: {topk_means.get(0.05, 0):.4f} | Top 10%: {topk_means.get(0.1, 0):.4f}")
     
-    return mean_kt_score, std_kt_score, topk_means, avg_inference_time
+    return mean_kt_score, std_kt_score, avg_inference_time
 
 hidden = args.nhid
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f'Running on device: {device}')
 scores_per_dataset = collections.defaultdict(list)
-topk_scores_per_dataset = collections.defaultdict(dict)
 times_per_dataset = collections.defaultdict(list)
 
-model = GNN_Bet(ninput=model_size, nhid=hidden, dropout=args.dropout, mode=args.mode, repeats=args.repeats, init_type=args.init_type, leverage=args.leverage, lcc=args.lcc, normalize=args.normalize, num_layers=args.num_layers)
+model = GNN_Bet(ninput=1, nhid=hidden, dropout=args.dropout, init_type=args.init_type, num_layers=args.num_layers)
 model.to(device)
 
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -336,7 +305,7 @@ num_epoch = args.epochs
 print("Training")
 print(f"Total Number of epochs: {num_epoch}")
 
-PICKLE_FILEPATH = f"pickles/between_network_{args.mode}_{args.repeats}_{args.init_type}_lev{args.leverage}_lcc{args.lcc}_hid{args.nhid}_norm{args.normalize}_accum{args.accumulate}_lay{args.num_layers}_ep{args.epochs}_seed{args.seed}_drop{args.dropout}.pickle"
+PICKLE_FILEPATH = f"pickles/between_network_{args.init_type}_hid{args.nhid}_accum{args.accumulate}_lay{args.num_layers}_ep{args.epochs}_seed{args.seed}_drop{args.dropout}.pickle"
 if os.path.exists(PICKLE_FILEPATH):
     print("Loading network pickle...")
     model.load_state_dict(torch.load(PICKLE_FILEPATH))
@@ -344,10 +313,10 @@ else:
     training_start_time = time.time()
     for e in range(num_epoch):
         print(f"Epoch number: {e+1}/{num_epoch}")
-        train(list_adj_train,list_adj_t_train,list_num_node_train,bc_mat_train,model_size, args.accumulate)
+        train(list_adj_train,list_adj_t_train,list_num_node_train,bc_mat_train, args.accumulate)
 
         with torch.no_grad():
-            test(list_adj_val,list_adj_t_val,list_num_node_val,bc_mat_val,model_size)
+            test(list_adj_val,list_adj_t_val,list_num_node_val,bc_mat_val)
     training_end_time = time.time()
     total_training_time = training_end_time - training_start_time
     torch.save(model.state_dict(), PICKLE_FILEPATH)
@@ -359,19 +328,16 @@ for data_name in TEST_GRAPHS:
     print(f"Testing on {data_name} dataset")
     real_graph_test, real_n_seq_test, real_num_node_test, real_bc_mat_test = test_data_dict[data_name]
     
-    real_adj_test, real_adj_t_test = graph_to_adj_bet(real_graph_test, real_n_seq_test, real_num_node_test, model_size)
+    real_adj_test, real_adj_t_test = graph_to_adj_bet(real_graph_test, real_n_seq_test, real_num_node_test)
     with torch.no_grad():
-        mean, std, topk_means, avg_time = test(real_adj_test, real_adj_t_test, real_num_node_test, real_bc_mat_test, model_size)
+        mean, std, avg_time = test(real_adj_test, real_adj_t_test, real_num_node_test, real_bc_mat_test)
         scores_per_dataset[data_name].append(mean)
         times_per_dataset[data_name].append(avg_time)
-        if args.top_k:
-            topk_scores_per_dataset[data_name] = topk_means
 
 print("\n" + "="*30)
 print("SPREADSHEET DATA (Copy & Paste)")
 print("="*30)
-alg_name = f"{args.mode}_{args.init_type}_{args.train_type}_{args.nhid}"
-if args.normalize: alg_name += "_norm"
+alg_name = f"baseline_{args.init_type}_{args.train_type}_{args.nhid}"
 if args.accumulate > 1: alg_name += f"_accum{args.accumulate}"
 if args.num_layers != 4: alg_name += f"_L{args.num_layers}"
 if abs(args.dropout - 0.6) > 1e-6: alg_name += f"_drop{args.dropout}"
@@ -402,29 +368,6 @@ with open(results_file, "a+") as f:
         f.write(header + "\n")
     f.write(csv_row + "\n")
     fcntl.flock(f, fcntl.LOCK_UN)
-
-if args.top_k:
-    results_file_topk = "results/all_results_topk.csv"
-    print(f"Writing detailed top-k results to {results_file_topk}...")
-
-    with open(results_file_topk, "a+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0, 2)
-        if f.tell() == 0:
-            f.write(header + "\n")
-        
-        f.write(csv_row + "\n")
-
-        for p_label, p_val in [("Top1%", 0.01), ("Top5%", 0.05), ("Top10%", 0.1)]:
-            row_parts = [f"{alg_name}_{p_label}"]
-            for name in TEST_GRAPHS:
-                if name in topk_scores_per_dataset and p_val in topk_scores_per_dataset[name]:
-                    row_parts.append(f"{topk_scores_per_dataset[name][p_val]:.4f}")
-                else:
-                    row_parts.append("")
-            f.write(",".join(row_parts) + "\n")
-            
-        fcntl.flock(f, fcntl.LOCK_UN)
 
 results_file_wallclock = "results/all_results_wallclock.csv"
 results_str_time = [alg_name]
