@@ -1,5 +1,7 @@
 # BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network
 
+Official code implementation for BRAVA-GNN, a parameter-efficient GNN for approximating betweenness centrality with to 214% improvement in Kendall–Tau correlation and up to 66× speedup in inference time over current state-of-the-art GNN-based approaches.
+
 ## Setup
 
 To install dependencies and activate the virtual environment (using `uv`):
