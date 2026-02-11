@@ -3,6 +3,12 @@
 
 Official code implementation for BRAVA-GNN, a parameter-efficient GNN for approximating betweenness centrality with to 214% improvement in Kendall–Tau correlation and up to 66× speedup in inference time over current state-of-the-art GNN-based approaches.
 
+---
+
+## Visual Results
+<img src="results/Jeju.png" alt="Jeju Island Predicted Rankings">
+Visual comparison on the Jeju Island road network. The predicted rankings (a) closely align with the ground-truth topology (b), demonstrating the model's capability to capture structural importance in high-diameter graphs.
+
 ## Setup
 
 To install dependencies and activate the virtual environment (using `uv`):
@@ -28,6 +34,8 @@ rmdir real
 python baselines/convert_abcde.py
 ```
 
+---
+
 ## Running the model code
 
 ```bash
@@ -36,6 +44,8 @@ python betweenness.py --init_type degree_mix_mass_6 --num_layers 2 --nhid 12 --d
 ```
 *   `--run_all_tests` will test on entire test suite, instead of a small subset.
 *   `--train_type` trains on a mix of 10 Scale-Free and 10 Hyperbolic graphs.
+
+---
 
 ### ABCDE Baseline
 
@@ -59,11 +69,15 @@ To run the ABCDE experiment:
 python baselines/run_abcde.py --seed 1
 ```
 
+---
+
 ## GNN-Bet Baseline
 
 ```bash
 python GNN-Bet/betweenness.py --g SF
 ```
+
+---
 
 ## Results
 
@@ -76,4 +90,22 @@ The following command will generate all LaTeX tables used in the paper from the 
 
 ```bash
 python parse_results.py
+```
+
+---
+
+## Citation
+
+If you find BRAVA-GNN useful in your research, please cite our paper:
+
+```bibtex
+@misc{dachille2026bravagnn,
+      title={BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network}, 
+      author={Justin Dachille and Aurora Rossi and Sunil Kumar Maurya and Frederik Mallmann-Trenn and Xin Liu and Frédéric Giroire and Tsuyoshi Murata and Emanuele Natale},
+      year={2026},
+      eprint={2602.09716},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2602.09716}, 
+}
 ```
