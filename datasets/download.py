@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Download raw graph datasets used in BRAVA-GNN experiments.
 
-Default: 19 paper test graphs (Table 11) into raw/ + abcde/.
-Pass --calibration to also fetch 15 parameter-tuning graphs (Table 12).
+Default: 14 paper test graphs (9 from SNAP, 5 from the ABCDE release) into raw/ + abcde/.
+Pass --calibration to also fetch the 10 parameter-tuning graphs used in the appendix.
 
 Idempotent: skips files that already exist unless --force is passed.
 """
@@ -72,11 +72,6 @@ def _strip_prefix(path: Path, prefix: str) -> None:
     tmp.replace(path)
 
 
-def _find_largest(root: Path, exclude_suffixes=(".zip", ".txt", ".gz", ".tar")) -> Path:
-    files = [p for p in root.rglob("*") if p.is_file() and p.suffix not in exclude_suffixes]
-    return max(files, key=lambda p: p.stat().st_size)
-
-
 def fetch_snap(url: str, name: str, force: bool) -> None:
     dest = RAW / f"{name}.txt"
     if dest.exists() and not force:
@@ -89,24 +84,6 @@ def fetch_snap(url: str, name: str, force: bool) -> None:
         with gzip.open(gz, "rb") as src, open(dest, "wb") as out:
             shutil.copyfileobj(src, out)
     _strip_prefix(dest, "#")
-
-
-def fetch_nrvis(url: str, name: str, force: bool) -> None:
-    dest = RAW / f"{name}.txt"
-    if dest.exists() and not force:
-        print(f"[skip] {name}")
-        return
-    print(f"[nrvis] {name}")
-    with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
-        zip_path = td / "download.zip"
-        _download(url, zip_path)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(td)
-        zip_path.unlink()
-        src = _find_largest(td)
-        shutil.move(src, dest)
-    _strip_prefix(dest, "%")
 
 
 def fetch_csv(url: str, name: str, member: str, force: bool) -> None:
@@ -158,7 +135,7 @@ def fetch_abcde(force: bool) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--calibration", action="store_true", help="Also fetch Table 12 graphs (~4 GB).")
+    ap.add_argument("--calibration", action="store_true", help="Also fetch the 10 parameter-tuning graphs.")
     ap.add_argument("--force", action="store_true", help="Re-download files that already exist.")
     args = ap.parse_args()
 
@@ -167,16 +144,12 @@ def main():
     print("=== Table 11 (test set) ===")
     for url, name in TEST_SNAP:
         fetch_snap(url, name, args.force)
-    for url, name in TEST_NRVIS:
-        fetch_nrvis(url, name, args.force)
     fetch_abcde(args.force)
 
     if args.calibration:
         print("=== Table 12 (calibration set) ===")
         for url, name in CAL_SNAP:
             fetch_snap(url, name, args.force)
-        for url, name in CAL_NRVIS:
-            fetch_nrvis(url, name, args.force)
         for url, name, member in CAL_CSV:
             fetch_csv(url, name, member, args.force)
 
