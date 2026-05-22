@@ -1,396 +1,253 @@
-import numpy as np
-import pickle
-import networkx as nx
-import torch
-from utils import *
-import random
-import torch.nn as nn
-from model_bet import GNN_Bet
-import argparse
-import os
 import collections
-import matplotlib.pyplot as plt
-import subprocess
-import sys
-import fcntl
 import time
-import scipy.sparse as sp
+import os
+import numpy as np
+import torch
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--init_type", default="AW", help="Initialization type: AW, degree, degree0, degree1, degree2, degree3")
-parser.add_argument("--train_type", default="SF", help="Train on SF or HY graphs (e.g., HY_10, HY_50, SF_HY, SF_HY_160)")
-parser.add_argument("--run_all_tests", action="store_true", help="Whether to run full test suite")
-parser.add_argument("--nhid", type=int, default=12, help="Number of hidden parameters")
-parser.add_argument("--num_layers", type=int, default=4, help="Number of layers for baseline mode")
-parser.add_argument("--skip_gen", action="store_true", help="Skip graph generation and wait for files to appear")
-parser.add_argument("--accumulate", type=int, default=1, help="Number of steps for gradient accumulation")
-parser.add_argument("--seed", type=int, default=20, help="Random seed")
-parser.add_argument("--dropout", type=float, default=0.3, help="Dropout rate (default: 0.3)")
-parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+from config import parse_args, set_seeds, resolve_train_graphs, resolve_test_graphs, get_algo_name
+from data import load_train_data, build_adj_cache, load_test_adj_or_build
+from training import train, evaluate
+from results import save_results
+from model_bet import GNN_Bet
+from utils import sparse_mx_to_torch_sparse_tensor, compute_landmark_feature, compute_pagerank_feature
+from layer import parse_init_type as _parse_init_type
+from flops import count_inference_gflops
 
-args = parser.parse_args()
 
-torch.manual_seed(args.seed)
-np.random.seed(args.seed)
-random.seed(args.seed)
+def _dump_predictions(model, adj_csr, adj_t_csr, num_nodes, bc_true, lm_np, pr_np,
+                      device, out_path):
+    """One forward pass; write per-node arrays to .npz for offline error analysis."""
+    adj = sparse_mx_to_torch_sparse_tensor(adj_csr).to(device)
+    adj_t = sparse_mx_to_torch_sparse_tensor(adj_t_csr).to(device)
+    lm = torch.from_numpy(lm_np).float().to(device) if lm_np is not None else None
+    pr = torch.from_numpy(pr_np).float().to(device) if pr_np is not None else None
+    with torch.no_grad():
+        y = model(adj, adj_t, landmarks=lm, pagerank=pr).reshape(-1)[:num_nodes]
+    pred = y.detach().cpu().numpy()
+    true = np.asarray(bc_true).reshape(-1)[:num_nodes]
+    out_deg = np.asarray(adj_csr.sum(axis=1)).reshape(-1)[:num_nodes]
+    in_deg = np.asarray(adj_csr.sum(axis=0)).reshape(-1)[:num_nodes]
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    np.savez_compressed(out_path, true_bc=true.astype(np.float32),
+                        pred_bc=pred.astype(np.float32),
+                        in_deg=in_deg.astype(np.int32),
+                        out_deg=out_deg.astype(np.int32))
 
-TRAIN_GRAPHS = ["SF"]
-if args.train_type == "SF_HY":
-    TRAIN_GRAPHS = ["SF", "HY"]
-elif args.train_type.startswith("SF_HY_"):
-    TRAIN_GRAPHS = ["SF", args.train_type.replace("SF_", "")]
-elif args.train_type.startswith("SF_") and "_HY_" in args.train_type:
-    parts = args.train_type.split("_HY_")
-    TRAIN_GRAPHS = [parts[0], "HY_" + parts[1]]
-elif args.train_type.startswith("HY"):
-    TRAIN_GRAPHS = [args.train_type]
-elif args.train_type.startswith("SF_"):
-    TRAIN_GRAPHS = [args.train_type]
 
-TEST_GRAPHS = ["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", \
-    "email-EuAll", "wiki-Talk", \
-    "soc-LiveJournal1", "cit-Patents", "wiki-topcats", "soc-Pokec", \
-    "amazon", "com-lj", "com-youtube", "dblp"] 
+def _compute_addons(list_adj, list_num_node, has_pr, sp_count, sp_mode):
+    """Compute (per-graph) addon features for an adjacency list. Returns
+    (list_landmarks, list_pagerank) as lists of (num_node, K) numpy arrays
+    (truncated to actual node count)."""
+    if not has_pr and not sp_count:
+        return None, None
+    lm_list = [] if sp_count else None
+    pr_list = [] if has_pr else None
+    for adj_csr, num in zip(list_adj, list_num_node):
+        if sp_count:
+            lm = compute_landmark_feature(adj_csr, sp_count, mode=sp_mode)
+            lm_list.append(lm[:num])
+        if has_pr:
+            pr = compute_pagerank_feature(adj_csr)
+            pr_list.append(pr[:num])
+    return lm_list, pr_list
 
-if args.run_all_tests:
-    TEST_GRAPHS = ["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", \
-        "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", \
-        "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", \
-        "soc-LiveJournal1", "cit-Patents", "wiki-topcats", "soc-Pokec", \
-        "amazon", "com-lj", "com-youtube", "dblp"] 
+args = parse_args()
+set_seeds(args.seed)
 
-def is_synthetic(g):
-    return g in ["SF", "ER", "GRP"] or g.startswith("HY") or g.startswith("SF_")
+run_name = get_algo_name(args)
 
-def check_and_generate(train_graphs, test_graphs):
-    needed_gen = []
-    
-    for g in set(train_graphs + test_graphs):
-        if is_synthetic(g):
-            if not os.path.exists(f"./datasets/data_splits/{g}/betweenness/training.pickle"):
-                needed_gen.append(g)
-        else:
-            if not os.path.exists(f"./datasets/data_splits/{g}_bet.pickle"):
-                needed_gen.append(g)
-            
-    if needed_gen:
-        print(f"Missing datasets detected: {needed_gen}. Running generation scripts...")
-        
-        cmd_gen = [sys.executable, "-u", "datasets/generate_graph.py", "--datasets"] + needed_gen
-        subprocess.check_call(cmd_gen)
-        
-        cmd_create = [sys.executable, "-u", "datasets/create_dataset.py", "--datasets"] + needed_gen
-        subprocess.check_call(cmd_create)
+TRAIN_GRAPHS = resolve_train_graphs(args.train_type)
+TEST_GRAPHS = args.test_graphs if args.test_graphs else resolve_test_graphs(args.run_all_tests)
 
-if not args.skip_gen:
-    check_and_generate(TRAIN_GRAPHS, TEST_GRAPHS)
+print(f"Train: {args.train_type} | Init: {args.init_type} | Layers: {args.num_layers} | "
+      f"Nhid: {args.nhid} | Dropout: {args.dropout} | Seed: {args.seed} | Epochs: {args.epochs}")
+
+timings = {}
+
+t0 = time.perf_counter()
+list_graph_train, list_n_seq_train, list_num_node_train, bc_mat_train, train_mtime = \
+    load_train_data(TRAIN_GRAPHS)
+timings["load_train"] = time.perf_counter() - t0
+
+model_size = max(list_num_node_train) if list_num_node_train else 0
+print(f"Model size: {model_size} (Train-set max; test graphs are processed at native size.)")
+
+val_key = TEST_GRAPHS[0] if TEST_GRAPHS else None
+val_data = load_test_adj_or_build(val_key, preprocessing=True) if val_key else None
+if val_data is None:
+    val_key = None
+    list_adj_val, list_adj_t_val, list_num_node_val, bc_mat_val = [], [], [], []
 else:
-    print("Skipping generation check (Waiting mode).")
+    list_adj_val, list_adj_t_val, list_num_node_val, bc_mat_val = val_data
+    print(f"Validation: {val_key}")
 
-def wait_for_file(filepath):
-    """Waits for a file to appear before continuing, checking every 30 seconds."""
-    if not os.path.exists(filepath):
-        print(f"Waiting for {filepath} to be created by another job...")
-        while not os.path.exists(filepath):
-            time.sleep(30)
-        print(f"Found {filepath}. Resuming.")
-        time.sleep(5)
+adj_cache_path = f"pickles/adj_data_scipy_{args.train_type}_{model_size}_None.pickle"
+cache_hit = os.path.exists(adj_cache_path) and os.path.getmtime(adj_cache_path) > train_mtime
+t0 = time.perf_counter()
+list_adj_train, list_adj_t_train, _, _ = build_adj_cache(
+    list_graph_train, list_n_seq_train, list_num_node_train,
+    [], [], [],
+    model_size, args.train_type, None, train_mtime)
+timings["build_adj_cache"] = time.perf_counter() - t0
+timings["adj_cache_hit"] = cache_hit
 
-gtype = args.train_type
-print(f'Training on {gtype} | Init: {args.init_type} | Nhid: {args.nhid}')
-print(f"Accumulation Steps: {args.accumulate} | Layers: {args.num_layers} | Seed: {args.seed} | Dropout: {args.dropout} | Epochs: {args.epochs}")
-
-print(f"Loading data...")
-list_graph_train, list_n_seq_train, list_num_node_train = [], [], []
-bc_mat_train = [] 
-
-latest_mtime = 0
-
-for g in TRAIN_GRAPHS:
-    if is_synthetic(g):
-        path = f"./datasets/data_splits/{g}/betweenness/training.pickle"
+# Parse init_type for optional _pr / _sp{N}_{mode} addon channels.
+_, _has_pr, _sp_count, _sp_mode = _parse_init_type(args.init_type)
+if _has_pr or _sp_count:
+    print(f"Init addons: pr={_has_pr}  sp={_sp_count}{('_'+_sp_mode) if _sp_count else ''}")
+    t0 = time.perf_counter()
+    lm_train, pr_train = _compute_addons(
+        list_adj_train, list_num_node_train, _has_pr, _sp_count, _sp_mode)
+    if list_adj_val:
+        lm_val, pr_val = _compute_addons(
+            list_adj_val, list_num_node_val, _has_pr, _sp_count, _sp_mode)
     else:
-        path = f"./datasets/data_splits/{g}_bet.pickle"
-    
-    if args.skip_gen:
-        wait_for_file(path)
-
-    if os.path.exists(path):
-        print(f'Loading {path}')
-        latest_mtime = max(latest_mtime, os.path.getmtime(path))
-        with open(path,"rb") as fopen:
-            data = pickle.load(fopen)
-            list_graph_train.extend(data[0])
-            list_n_seq_train.extend(data[1])
-            list_num_node_train.extend(data[2])
-            
-            cent_mat_chunk = data[3]
-            nodes_in_chunk = data[2]
-            
-            for k in range(cent_mat_chunk.shape[1]):
-                valid_count = nodes_in_chunk[k]
-                bc_mat_train.append(cent_mat_chunk[:valid_count, k])
-
-unique_indices = []
-seen_graph_ids = set()
-for i, g in enumerate(list_graph_train):
-    gid = id(g)
-    if gid not in seen_graph_ids:
-        seen_graph_ids.add(gid)
-        unique_indices.append(i)
-
-if len(unique_indices) < len(list_graph_train):
-    print(f"Filtering duplicates from dataset: Reduced from {len(list_graph_train)} to {len(unique_indices)} unique graphs.")
-    list_graph_train = [list_graph_train[i] for i in unique_indices]
-    list_n_seq_train = [list_n_seq_train[i] for i in unique_indices]
-    list_num_node_train = [list_num_node_train[i] for i in unique_indices]
-    bc_mat_train = [bc_mat_train[i] for i in unique_indices]
-
-
-test_data_dict = {}
-for g in TEST_GRAPHS:
-    if is_synthetic(g):
-        path = f"./datasets/data_splits/{g}/betweenness/test.pickle"
-    else:
-        path = f"./datasets/data_splits/{g}_bet.pickle"
-    
-    if args.skip_gen:
-        wait_for_file(path)
-
-    if os.path.exists(path):
-        print(f"  Loading {path}")
-        latest_mtime = max(latest_mtime, os.path.getmtime(path))
-        with open(path,"rb") as fopen:
-            d = pickle.load(fopen)
-            c_mat = d[3]
-            l_nodes = d[2]
-            c_list = [c_mat[:l_nodes[k], k] for k in range(c_mat.shape[1])]
-            
-            test_data_dict[g] = (d[0], d[1], d[2], c_list)
-    else:
-        print(f'dataset {g} not found at {path}, skipping')
-
-
-if not os.path.exists("pickles"): os.makedirs("pickles")
-
-val_idx = 0
-val_key = TEST_GRAPHS[val_idx] if (len(TEST_GRAPHS) > val_idx and TEST_GRAPHS[val_idx] in test_data_dict) else None
-if val_key:
-    list_graph_val, list_n_seq_val, list_num_node_val, bc_mat_val = test_data_dict[val_key]
-    print(f"Using {val_key} as validation set.")
+        lm_val, pr_val = None, None
+    timings["compute_train_val_addons"] = time.perf_counter() - t0
+    print(f"  train+val addon compute: {timings['compute_train_val_addons']:.1f}s")
 else:
-    list_graph_val, list_n_seq_val, list_num_node_val, bc_mat_val = [], [], [], []
+    lm_train, pr_train, lm_val, pr_val = None, None, None, None
 
-adj_cache_path = f"pickles/adj_data_scipy_{gtype}_{val_key}.pickle"
-lock_path = adj_cache_path + ".lock"
-with open(lock_path, "w") as lock_file:
-    print(f"Acquiring lock for adjacency conversion: {adj_cache_path}")
-    fcntl.flock(lock_file, fcntl.LOCK_EX)
-    
-    cache_valid = os.path.exists(adj_cache_path) and os.path.getmtime(adj_cache_path) > latest_mtime
-
-    if cache_valid:
-        print(f"Loading cached adjacency conversion (Scipy) from {adj_cache_path}")
-        with open(adj_cache_path, "rb") as f:
-            list_adj_train, list_adj_t_train, list_adj_val, list_adj_t_val = pickle.load(f)
-    else:
-        print(f"No valid cache found. Starting Graphs to adjacency conversion (Scipy Sparse).")
-        list_adj_train, list_adj_t_train = graph_to_adj_bet(list_graph_train, list_n_seq_train, list_num_node_train)
-        list_adj_val, list_adj_t_val = graph_to_adj_bet(list_graph_val, list_n_seq_val, list_num_node_val)
-        
-        with open(adj_cache_path, "wb") as f:
-            pickle.dump([list_adj_train, list_adj_t_train, list_adj_val, list_adj_t_val], f)
-    
-    fcntl.flock(lock_file, fcntl.LOCK_UN)
-
-
-def train(list_adj_train, list_adj_t_train, list_num_node_train, bc_mat_train, accum_steps=1):
-    model.train()
-    
-    gpu_graphs = []
-    for i in range(len(list_adj_train)):
-        adj = sparse_mx_to_torch_sparse_tensor(list_adj_train[i]).to(device).coalesce()
-        adj_t = sparse_mx_to_torch_sparse_tensor(list_adj_t_train[i]).to(device).coalesce()
-        
-        true_val = torch.from_numpy(bc_mat_train[i]).float().to(device)
-        gpu_graphs.append((adj, adj_t, true_val, list_num_node_train[i]))
-        
-    num_virtual_copies = 50 
-    
-    optimizer.zero_grad()
-    
-    for _ in range(num_virtual_copies):
-        indices = torch.randperm(len(gpu_graphs))
-        
-        for i, idx in enumerate(indices):
-            adj, adj_t, true_val, node_num = gpu_graphs[idx]
-            
-            perm = torch.randperm(node_num, device=device)
-            
-            batch_true_val = true_val[perm]
-            inv_perm = torch.argsort(perm)
-            
-            def permute_adj(src_adj, map_idx, num_nodes):
-                old_indices = src_adj.indices()
-                new_indices = map_idx[old_indices]
-                
-                return torch.sparse_coo_tensor(new_indices, src_adj.values(), (num_nodes, num_nodes), device=device).coalesce()
-
-            batch_adj = permute_adj(adj, inv_perm, node_num)
-            batch_adj_t = permute_adj(adj_t, inv_perm, node_num)
-            
-            y_out = model(batch_adj, batch_adj_t)
-            loss = loss_cal(y_out, batch_true_val, node_num, device)
-            
-            if accum_steps > 1:
-                loss = loss / accum_steps
-            
-            loss.backward()
-            
-            if (i + 1) % accum_steps == 0 or (i + 1) == len(indices):
-                optimizer.step()
-                optimizer.zero_grad()
-
-def test(list_adj_test, list_adj_t_test, list_num_node_test, bc_mat_test):
-    model.eval()
-    list_kt = list()
-    total_inference_time = 0
-    
-    num_samples_test = len(list_adj_test)
-    for j in range(num_samples_test):
-        adj_sparse = list_adj_test[j]
-        adj_t_sparse = list_adj_t_test[j]
-        
-        adj_tensor = sparse_mx_to_torch_sparse_tensor(adj_sparse).to(device)
-        adj_t_tensor = sparse_mx_to_torch_sparse_tensor(adj_t_sparse).to(device)
-        
-        num_nodes = list_num_node_test[j]
-        
-        if torch.cuda.is_available(): torch.cuda.synchronize()
-        start = time.time()
-        y_out = model(adj_tensor, adj_t_tensor)
-        if torch.cuda.is_available(): torch.cuda.synchronize()
-        end = time.time()
-        total_inference_time += (end - start)
-        
-        true_arr = torch.from_numpy(bc_mat_test[j]).float()
-        true_val = true_arr.to(device)
-    
-        kt = ranking_correlation(y_out, true_val, num_nodes)
-        list_kt.append(kt)
-
-    mean_kt_score = np.mean(np.array(list_kt))
-    std_kt_score = np.std(np.array(list_kt))
-    avg_inference_time = total_inference_time / num_samples_test
-    
-    print(f"   Average KT score on test graphs is: {mean_kt_score:.4f} and std: {std_kt_score:.4f}")
-    
-    return mean_kt_score, std_kt_score, avg_inference_time
-
-hidden = args.nhid
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f'Running on device: {device}')
-scores_per_dataset = collections.defaultdict(list)
-times_per_dataset = collections.defaultdict(list)
+print(f"Device: {device}")
 
-model = GNN_Bet(ninput=1, nhid=hidden, dropout=args.dropout, init_type=args.init_type, num_layers=args.num_layers)
-model.to(device)
+t0 = time.perf_counter()
+model = GNN_Bet(
+    ninput=model_size, nhid=args.nhid, dropout=args.dropout, mode=args.mode,
+    repeats=args.repeats, init_type=args.init_type, leverage=args.leverage,
+    normalize=args.normalize, num_layers=args.num_layers,
+    fusion=args.fusion, shared_encoders=not args.unshared_encoders,
+).to(device)
+if torch.cuda.is_available(): torch.cuda.synchronize()
+timings["model_init"] = time.perf_counter() - t0
 
-num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"Number of learnable parameters: {num_params}")
+print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
 
-optimizer = torch.optim.Adam(model.parameters(),lr=0.005)
-num_epoch = args.epochs
+per_epoch_train, per_epoch_val = [], []
+training_start = time.time()
+for e in range(args.epochs):
+    print(f"Epoch {e+1}/{args.epochs}")
 
-print("Training")
-print(f"Total Number of epochs: {num_epoch}")
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    avg_loss = train(model, optimizer, list_adj_train, list_adj_t_train, list_num_node_train,
+          bc_mat_train, model_size, device, args.accumulate,
+          list_landmarks_train=lm_train, list_pagerank_train=pr_train)
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    per_epoch_train.append(time.perf_counter() - t0)
 
-PICKLE_FILEPATH = f"pickles/between_network_{args.init_type}_hid{args.nhid}_accum{args.accumulate}_lay{args.num_layers}_ep{args.epochs}_seed{args.seed}_drop{args.dropout}.pickle"
-if os.path.exists(PICKLE_FILEPATH):
-    print("Loading network pickle...")
-    model.load_state_dict(torch.load(PICKLE_FILEPATH))
-else:
-    training_start_time = time.time()
-    for e in range(num_epoch):
-        print(f"Epoch number: {e+1}/{num_epoch}")
-        train(list_adj_train,list_adj_t_train,list_num_node_train,bc_mat_train, args.accumulate)
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        val_kt, val_std, val_topk, _ = evaluate(
+            model, list_adj_val, list_adj_t_val, list_num_node_val, bc_mat_val,
+            model_size, device, args.top_k,
+            list_landmarks_test=lm_val, list_pagerank_test=pr_val,
+        )
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    per_epoch_val.append(time.perf_counter() - t0)
 
-        with torch.no_grad():
-            test(list_adj_val,list_adj_t_val,list_num_node_val,bc_mat_val)
-    training_end_time = time.time()
-    total_training_time = training_end_time - training_start_time
-    torch.save(model.state_dict(), PICKLE_FILEPATH)
+    log_dict = {
+        "epoch": e + 1,
+        "train_loss": avg_loss,
+        "val_kt": val_kt,
+        "timing/epoch_train": per_epoch_train[-1],
+        "timing/epoch_val": per_epoch_val[-1],
+    }
+
+    if args.top_k:
+        log_dict.update({f"val_top{int(k*100)}": v for k, v in val_topk.items()})
+
+total_training_time = time.time() - training_start
+timings["train_total"] = total_training_time
+
+scores = collections.defaultdict(list)
+scores_filtered = collections.defaultdict(list)
+times = collections.defaultdict(list)
+flops = collections.defaultdict(list)
+topk_scores = collections.defaultdict(dict)
+topk_scores_filtered = collections.defaultdict(dict)
 
 print("Testing on real datasets")
-for data_name in TEST_GRAPHS:
-    if data_name not in test_data_dict:
-        continue
-    print(f"Testing on {data_name} dataset")
-    real_graph_test, real_n_seq_test, real_num_node_test, real_bc_mat_test = test_data_dict[data_name]
-    
-    real_adj_test, real_adj_t_test = graph_to_adj_bet(real_graph_test, real_n_seq_test, real_num_node_test)
+final_test_metrics = {}
+per_test_eval_total = {}
+
+for name in TEST_GRAPHS:
+    if name == val_key:
+        adj, adj_t, num, bc = list_adj_val, list_adj_t_val, list_num_node_val, bc_mat_val
+        test_lm, test_pr = lm_val, pr_val
+    else:
+        loaded = load_test_adj_or_build(name, preprocessing=not args.no_preprocessing)
+        if loaded is None:
+            print(f"Dataset {name} not found, skipping")
+            continue
+        adj, adj_t, num, bc = loaded
+        if _has_pr or _sp_count:
+            test_lm, test_pr = _compute_addons(adj, num, _has_pr, _sp_count, _sp_mode)
+        else:
+            test_lm, test_pr = None, None
+    print(f"Testing: {name}")
+
+    t0 = time.perf_counter()
     with torch.no_grad():
-        mean, std, avg_time = test(real_adj_test, real_adj_t_test, real_num_node_test, real_bc_mat_test)
-        scores_per_dataset[data_name].append(mean)
-        times_per_dataset[data_name].append(avg_time)
+        mean, std, topk, avg_time, mean_f, topk_f = evaluate(
+            model, adj, adj_t, num, bc, model_size, device, args.top_k,
+            list_landmarks_test=test_lm, list_pagerank_test=test_pr,
+            compute_filtered=True,
+        )
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    per_test_eval_total[name] = time.perf_counter() - t0
 
-print("\n" + "="*30)
-print("SPREADSHEET DATA (Copy & Paste)")
-print("="*30)
-alg_name = f"baseline_{args.init_type}_{args.train_type}_{args.nhid}"
-if args.accumulate > 1: alg_name += f"_accum{args.accumulate}"
-if args.num_layers != 4: alg_name += f"_L{args.num_layers}"
-if abs(args.dropout - 0.6) > 1e-6: alg_name += f"_drop{args.dropout}"
-if args.epochs != 10: alg_name += f"_E{args.epochs}"
-alg_name += f"_S{args.seed}"
+    scores[name].append(mean)
+    scores_filtered[name].append(mean_f)
+    times[name].append(avg_time)
+    _adj_fwd = sparse_mx_to_torch_sparse_tensor(adj[0]).to(device)
+    _adj_rev = sparse_mx_to_torch_sparse_tensor(adj_t[0]).to(device)
+    _lm = torch.from_numpy(test_lm[0]).float().to(device) if test_lm else None
+    _pr = torch.from_numpy(test_pr[0]).float().to(device) if test_pr else None
+    flops[name].append(count_inference_gflops(model, _adj_fwd, _adj_rev, _lm, _pr))
+    if args.top_k:
+        topk_scores[name] = topk
+        topk_scores_filtered[name] = topk_f
 
-header = "Algorithm," + ",".join(TEST_GRAPHS)
-print(header)
+    if args.dump_predictions:
+        _dump_predictions(
+            model, adj[0], adj_t[0], num[0], bc[0],
+            test_lm[0] if test_lm else None,
+            test_pr[0] if test_pr else None,
+            device,
+            os.path.join(args.results_dir, "betweenness", "predictions",
+                         f"{run_name}__{name}.npz"),
+        )
 
-results_str = [alg_name]
+    final_test_metrics[f"test/{name}_KT"] = mean
+    final_test_metrics[f"test/{name}_KT_filtered"] = mean_f
+    final_test_metrics[f"test/{name}_Time"] = avg_time
+    final_test_metrics[f"timing/test_{name}_eval_total"] = per_test_eval_total[name]
+    if args.top_k:
+        for p, acc in topk.items():
+             final_test_metrics[f"test/{name}_Top{int(p*100)}"] = acc
+        for p, acc in topk_f.items():
+             final_test_metrics[f"test/{name}_Top{int(p*100)}_filtered"] = acc
+
+print("\n=== Timing Summary ===")
+print(f"  load_train        : {timings['load_train']:.2f}s")
+print(f"  build_adj_cache   : {timings['build_adj_cache']:.2f}s ({'hit' if timings['adj_cache_hit'] else 'miss'})")
+print(f"  model_init        : {timings['model_init']:.2f}s")
+print(f"  training_total    : {timings['train_total']:.2f}s ({args.epochs} epochs)")
+if per_epoch_train:
+    print(f"    epoch train avg : {sum(per_epoch_train)/len(per_epoch_train):.2f}s "
+          f"(min {min(per_epoch_train):.2f}s, max {max(per_epoch_train):.2f}s)")
+    print(f"    epoch val avg   : {sum(per_epoch_val)/len(per_epoch_val):.2f}s")
+print("  per-test eval total:")
 for name in TEST_GRAPHS:
-    if name in scores_per_dataset and scores_per_dataset[name]:
-        results_str.append(f"{scores_per_dataset[name][0]:.4f}")
-    else:
-        results_str.append("")
-csv_row = ",".join(results_str)
-print(csv_row)
-print("="*30)
+    if name in per_test_eval_total:
+        print(f"    {name:<28s}  {per_test_eval_total[name]:6.2f}s")
 
-if not os.path.exists("results"):
-    os.makedirs("results")
+save_results(run_name, TEST_GRAPHS, scores, times, topk_scores, total_training_time,
+             args.top_k, os.path.join(args.results_dir, "betweenness"),
+             scores_filtered=scores_filtered,
+             topk_scores_filtered=topk_scores_filtered if args.top_k else None,
+             flops=flops)
 
-results_file = "results/all_results.csv"
-with open(results_file, "a+") as f:
-    fcntl.flock(f, fcntl.LOCK_EX)
-    f.seek(0, 2)
-    if f.tell() == 0:
-        f.write(header + "\n")
-    f.write(csv_row + "\n")
-    fcntl.flock(f, fcntl.LOCK_UN)
-
-results_file_wallclock = "results/all_results_wallclock.csv"
-results_str_time = [alg_name]
-for name in TEST_GRAPHS:
-    if name in times_per_dataset and times_per_dataset[name]:
-        results_str_time.append(f"{times_per_dataset[name][0]:.6f}")
-    else:
-        results_str_time.append("")
-csv_row_time = ",".join(results_str_time)
-
-with open(results_file_wallclock, "a+") as f:
-    fcntl.flock(f, fcntl.LOCK_EX)
-    f.seek(0, 2)
-    if f.tell() == 0:
-        f.write(header + "\n")
-    f.write(csv_row_time + "\n")
-    fcntl.flock(f, fcntl.LOCK_UN)
-
-results_file_training = "results/all_results_training_time.csv"
-with open(results_file_training, "a+") as f:
-    fcntl.flock(f, fcntl.LOCK_EX)
-    f.seek(0, 2)
-    if f.tell() == 0:
-        f.write("Algorithm,Time\n")
-    f.write(f"{alg_name},{total_training_time:.4f}\n")
-    fcntl.flock(f, fcntl.LOCK_UN)
+print("Done.")

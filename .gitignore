@@ -9,8 +9,23 @@ best.ckpt
 experiments/
 
 betweenness_centrality/
-datasets/real_graph/computed/
 *.lock
+
+# BRAVA-GNN runtime artifacts
+*.pickle
+*.pkl
+*.npz
+pickles/
+wandb/
+!results/*.csv
+!results/**/*.csv
+datasets/raw/
+datasets/abcde/
+datasets/data_splits/**
+!datasets/data_splits/.gitkeep
+datasets/graphs/**
+!datasets/graphs/.gitkeep
+models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

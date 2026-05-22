@@ -6,8 +6,17 @@ import numpy as np
 import time
 import os
 import argparse
+import sys
 
 np.random.seed(1)
+
+# Test graphs stored as DiGraph but semantically undirected (0% reciprocity,
+# bidirectional underlying relation). Symmetrize at load so ground-truth BC
+# is computed on a graph where A = A^T. See docs/graph_regimes.md.
+UNDIRECTED_STORED_AS_DIGRAPH = {
+    "p2p-Gnutella31",
+}
+
 
 def load_real_data(file_path, is_undirected=False):
     original_to_new = {}
@@ -17,14 +26,10 @@ def load_real_data(file_path, is_undirected=False):
     with open(file_path, 'r') as file:
         for line in file:
             if line.startswith('#') or line.startswith('%'):
-                continue 
+                continue
             parts = line.split()
-            if len(parts) < 2:
-                continue
-            try:
-                from_node, to_node = int(parts[0]), int(parts[1])
-            except ValueError:
-                continue
+            if len(parts) < 2: continue
+            from_node, to_node = int(parts[0]), int(parts[1])
             
             if from_node not in original_to_new:
                 original_to_new[from_node] = new_id
@@ -43,27 +48,38 @@ def load_real_data(file_path, is_undirected=False):
     
     return G
 
-def create_graph(graph_type, idx=0):
+def create_graph(graph_type, idx=0, num_nodes=100000):
+    # Required regime suffix on SF/HY: _Dir, _Sym, _SymBA (SF only), or _mNN (HY only).
+    # _SymBA must be matched before _Sym since _Sym is its prefix.
+    regime = None
+    base = graph_type
+    for suf in ("_mNN", "_Dir", "_SymBA", "_Sym"):
+        if graph_type.endswith(suf):
+            regime, base = suf[1:], graph_type[:-len(suf)]
+            break
 
-    num_nodes =100000 #np.random.randint(100000,100000)
-
-    if graph_type == "ER":
-        #Erdos-Renyi random graphs
+    if base == "ER":
         p = np.random.randint(2,25)*0.0001
         g_nx = nx.generators.random_graphs.fast_gnp_random_graph(num_nodes,p = p,directed = True)
         return g_nx
 
-    if graph_type == "SF" or graph_type.startswith("SF_"):
-        #Scalefree graphs
+    if base == "SF" or base.startswith("SF_"):
+        if regime is None:
+            raise ValueError(f"{graph_type}: SF requires an explicit regime suffix (_Dir, _Sym, or _SymBA)")
+        if regime == "SymBA":
+            m = int(np.random.randint(2, 6))
+            print(f" [DEBUG] SF SymBA Params: N={num_nodes}, m={m}")
+            return nx.barabasi_albert_graph(num_nodes, m).to_directed()
         alpha = np.random.randint(40,60)*0.01
         gamma = 0.05
         beta = 1 - alpha - gamma
         g_nx = nx.scale_free_graph(num_nodes,alpha = alpha,beta = beta,gamma = gamma)
+        if regime == "Sym":
+            g_nx = g_nx.to_undirected().to_directed()
         return g_nx
 
 
-    if graph_type == "GRP":
-        #Gaussian-Random Partition Graphs
+    if base == "GRP":
         s = np.random.randint(200,1000)
         v = np.random.randint(200,1000)
         p_in = np.random.randint(2,25)*0.0001
@@ -71,64 +87,132 @@ def create_graph(graph_type, idx=0):
         g_nx = nx.generators.gaussian_random_partition_graph(num_nodes,s = s, v = v, p_in = p_in, p_out = p_out, directed = True)
         assert nx.is_directed(g_nx)==True,"Not directed"
         return g_nx
-    
-    if graph_type.startswith("HY"):
-        num_nodes = 100000
-        
-        # Determine generation mode
-        # Mode 0: Fixed (Original)
-        # Mode 1: Uniform Random
-        # Mode 2: Real Data Stats (Current/Default)
-        # k = average degree, gamma = power law exponent, T = temperature
-        
-        mode = 2
-        
-        parts = graph_type.split('_')
-        if len(parts) >= 3 and parts[-1].isdigit():
-             mode = int(parts[-1])
-        
-        if graph_type == "HY":
-            mode = 0
 
-        if mode == 0:
-            k = 25
-            gamma = 3
-            T = 0
-        elif mode == 1:
-            k = np.random.uniform(3, 28)
-            gamma = np.random.uniform(2.1, 7.2)
-            T = np.random.uniform(0, 0.5)
-        else:
-            REAL_DATA_STATS = [
-                (12.1298, 2.2056),  # soc-Slashdot0811
-                (32.4296, 2.4494),  # gemsec-Facebook
-                (15.3317, 2.5023),  # musae-github
-                (80.8684, 2.1334),  # twitch-gamers
-                (76.2814, 2.2849),  # com-Orkut
-                (6.6221, 3.5380),   # com-DBLP
-                (19.4080, 2.6299),  # web-BerkStan
-                (6.6933, 2.4715),   # web-NotreDame
-                (10.0202, 2.3982),  # email-Enron
-                (4.8159, 7.0192),   # p2p-Gnutella30
-                (2.7852, 6.8398),   # roadNet-TX
-                (2.4140, 6.9798),   # road-euroroad
-                (2.5677, 2.9640),   # road-usroads-48
-                (7.1955, 2.5423),   # road-usroads
-                (2.0980, 7.9782),   # road-italy-osm
-            ]            
-            target_k, target_gamma = REAL_DATA_STATS[np.random.randint(len(REAL_DATA_STATS))]
+    if base.startswith("HY"):
+        if regime is None:
+            raise ValueError(f"{graph_type}: HY requires an explicit regime suffix (_Dir, _Sym, or _mNN)")
 
-            k = target_k * np.random.uniform(0.95, 1.05)
-            gamma = target_gamma * np.random.uniform(0.95, 1.05)
-            
-            # Clamp gamma > 2 (Requirement for HyperbolicGenerator)
-            gamma = max(2.1, gamma)
-            T = np.random.uniform(0, 0.5)
-        
-        print(f"HY Params (Mode {mode}): k={k:.4f}, gamma={gamma:.4f}, T={T:.4f}")
+        if regime == "mNN":
+            # Geometric directed hyperbolic graph (Kasyanov et al. arXiv:2303.01002).
+            # Out-degree is exactly m to the m hyperbolic-nearest neighbours.
+            # Periphery-dominated regime (m/ν ≥ ~10²) yields the truncated
+            # power-law in-degree with exponent -3 (paper §III.E, Fig 7).
+            # m ≥ 12 keeps the LCC ≈ N at this scale; smaller m shatters
+            # because the periphery's local m-NN clusters no longer bridge
+            # angular sectors. The paper never claims connectivity (Fig 7
+            # only reports in-degree distributions), so we pin empirically.
+            m = int(np.random.choice([12, 16, 20]))
+            m_over_nu = float(np.random.uniform(100.0, 2000.0))
+            nu = m / m_over_nu
+            R = float(np.arccosh(1.0 + num_nodes / (2.0 * np.pi * nu)))
+            print(f" [DEBUG] HY mNN Params: N={num_nodes}, m={m}, R={R:.3f}, nu={nu:.5f}, m/nu={m_over_nu:.1f}")
+            r_arr, theta_arr = _sample_hy_disk_uniform(num_nodes, R)
+            return _build_hy_mNN_edges(r_arr, theta_arr, m)
+
+        # k = average degree, gamma = power law exponent, T = temperature.
+        # Sampled from real-graph (k, gamma) stats with ±5% jitter.
+        REAL_DATA_STATS = [
+            (21.4106, 2.1604),  # soc-Slashdot0811  (directed: total degree)
+            (32.4296, 2.4494),  # gemsec-Facebook
+            (15.3317, 2.5023),  # musae-github
+            (80.8684, 2.1334),  # twitch-gamers
+            (76.2814, 2.2849),  # com-Orkut
+            (6.6221, 3.5380),   # com-DBLP
+            (22.1841, 2.6245),  # web-BerkStan      (directed: total degree)
+            (9.0239, 2.0757),   # web-NotreDame     (directed: total degree)
+            (10.0202, 2.3982),  # email-Enron
+            (4.8159, 7.0192),   # p2p-Gnutella30
+        ]
+        target_k, target_gamma = REAL_DATA_STATS[np.random.randint(len(REAL_DATA_STATS))]
+
+        k = target_k * np.random.uniform(0.95, 1.05)
+        # Clamp gamma > 2 (HyperbolicGenerator requirement).
+        gamma = max(2.1, target_gamma * np.random.uniform(0.95, 1.05))
+        T = np.random.uniform(0, 0.5)
+
+        print(f" [DEBUG] HY Params: k={k:.4f}, gamma={gamma:.4f}, T={T:.4f}")
         hg = generators.HyperbolicGenerator(num_nodes, k, gamma, T)
-        hgG = hg.generate()
-        return nkit2nx(hgG)
+        g_nx = nkit2nx(hg.generate())
+        if regime == "Dir":
+            # Random per-edge orientation → DiGraph with ~0% reciprocity.
+            dg = nx.DiGraph()
+            dg.add_nodes_from(g_nx.nodes())
+            for u, v in g_nx.edges():
+                if np.random.rand() < 0.5:
+                    dg.add_edge(u, v)
+                else:
+                    dg.add_edge(v, u)
+            return dg
+        # _Sym: symmetric DiGraph → downstream BC = undirected BC.
+        return g_nx.to_directed()
+
+
+def _sample_hy_disk_uniform(n, R):
+    """Sample n points uniformly on a hyperbolic disk of radius R (α=1).
+
+    Hyperbolic polar area element dA = sinh(ρ)dρdθ (paper eq 11), so
+    uniform-on-disk has radial CDF F(r) = (cosh r − 1)/(cosh R − 1) (eq 12).
+    Inverse-CDF: r = arccosh(1 + U·(cosh R − 1)).
+    """
+    r = np.arccosh(1.0 + np.random.uniform(0.0, np.cosh(R) - 1.0, size=n))
+    theta = np.random.uniform(0.0, 2.0 * np.pi, size=n)
+    return r.astype(np.float32), theta.astype(np.float32)
+
+
+def _build_hy_mNN_edges(r, theta, m, chunk_size=2000):
+    """Directed m-NN graph from hyperbolic coordinates.
+
+    Pairwise distance via the hyperbolic cosine theorem (paper eq 14):
+        cosh(d_ij) = cosh(r_i)cosh(r_j) − sinh(r_i)sinh(r_j) cos(θ_i − θ_j).
+    Computed in row-chunks (CUDA if available, else NumPy) to bound memory.
+    Each row's m smallest entries (excluding self) become out-edges.
+    """
+    n = int(r.shape[0])
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        r_t = torch.from_numpy(r).to(device)
+        theta_t = torch.from_numpy(theta).to(device)
+        cosh_r = torch.cosh(r_t)
+        sinh_r = torch.sinh(r_t)
+        srcs, tgts = [], []
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            ci = cosh_r[start:end].unsqueeze(1)
+            si = sinh_r[start:end].unsqueeze(1)
+            ti = theta_t[start:end].unsqueeze(1)
+            arg = ci * cosh_r.unsqueeze(0) - si * sinh_r.unsqueeze(0) * torch.cos(ti - theta_t.unsqueeze(0))
+            d = torch.acosh(torch.clamp(arg, min=1.0))
+            d[torch.arange(end - start, device=device), torch.arange(start, end, device=device)] = float("inf")
+            _, nbrs = torch.topk(d, k=m, largest=False, dim=1)
+            src = torch.arange(start, end, device=device).unsqueeze(1).expand(-1, m).reshape(-1)
+            srcs.append(src.cpu().numpy())
+            tgts.append(nbrs.reshape(-1).cpu().numpy())
+        src_all = np.concatenate(srcs)
+        tgt_all = np.concatenate(tgts)
+    except ImportError:
+        cosh_r = np.cosh(r)
+        sinh_r = np.sinh(r)
+        srcs, tgts = [], []
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            ci = cosh_r[start:end][:, None]
+            si = sinh_r[start:end][:, None]
+            ti = theta[start:end][:, None]
+            arg = ci * cosh_r[None, :] - si * sinh_r[None, :] * np.cos(ti - theta[None, :])
+            np.clip(arg, 1.0, None, out=arg)
+            d = np.arccosh(arg)
+            d[np.arange(end - start), np.arange(start, end)] = np.inf
+            nbrs = np.argpartition(d, m, axis=1)[:, :m]
+            srcs.append(np.repeat(np.arange(start, end), m))
+            tgts.append(nbrs.reshape(-1))
+        src_all = np.concatenate(srcs)
+        tgt_all = np.concatenate(tgts)
+
+    g = nx.DiGraph()
+    g.add_nodes_from(range(n))
+    g.add_edges_from(zip(src_all.tolist(), tgt_all.tolist()))
+    return g
 
 
 def nx2nkit(g_nx):
@@ -148,139 +232,118 @@ def nkit2nx(g_nkit):
     return nxadapter.nk2nx(g_nkit)
 
 
-def cal_exact_bet(g_nx):
-
-    #exact_bet = nx.betweenness_centrality(g_nx,normalized=True)
-
+def cal_exact_bet(g_nkit):
     exact_bet = centrality.Betweenness(g_nkit,normalized=True).run().ranking()
     exact_bet_dict = dict()
     for j in exact_bet:
         exact_bet_dict[j[0]] = j[1]
     return exact_bet_dict
 
-def cal_exact_close(g_nx):
-    
-    #exact_close = nx.closeness_centrality(g_nx, reverse=False)
+def main():
+    print("Load and process data graphs")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--datasets", nargs="+", default=["Wiki-Vote", "soc-Epinions1", "web-Google", "soc-Slashdot0811","p2p-Gnutella31"])
+    parser.add_argument("--num_nodes", type=int, default=100000)
+    # Manually extract --datasets values before argparse to handle names starting with '-'
+    # (e.g. negative lat/lon coordinates like -0.3560_117.2740_r195239_n102157)
+    _datasets = None
+    if '--datasets' in sys.argv:
+        _start = sys.argv.index('--datasets')
+        _vals, _i = [], _start + 1
+        while _i < len(sys.argv) and not sys.argv[_i].startswith('--'):
+            _vals.append(sys.argv[_i])
+            _i += 1
+        _datasets = _vals
+        sys.argv = sys.argv[:_start] + sys.argv[_i:]
+    args = parser.parse_args()
+    if _datasets is not None:
+        args.datasets = _datasets
 
-    exact_close = centrality.Closeness(g_nkit,True,1).run().ranking()
+    output_dir = "./datasets/graphs/"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    exact_close_dict = dict()
-    for j in exact_close:
-        exact_close_dict[j[0]] = j[1]
+    for data in args.datasets:
+        is_synthetic = data in ["SF", "ER", "GRP"] or data.startswith("HY") or data.startswith("SF_")
 
-    return exact_close_dict
+        if is_synthetic:
+            fname_bet = "./datasets/graphs/"+data+"_data_bet.pickle"
 
+            if os.path.exists(fname_bet):
+                print(f"Skipping {data} (exists)")
+                continue
 
-
-print("Load and process data graphs")
-parser = argparse.ArgumentParser()
-parser.add_argument("--datasets", nargs="+", default=["web-Google", "soc-Epinions1", "soc-Slashdot0902", "p2p-Gnutella31", 
-        "email-EuAll", "road-luxembourg-osm", "wiki-Talk", "road-roadNet-PA", 
-        "road-belgium-osm", "road-roadNet-CA", "road-netherlands-osm", 
-        "soc-LiveJournal1", "wiki-topcats", "soc-Pokec"])
-args = parser.parse_args()
-
-output_dir = "./datasets/graphs/"
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-for data in args.datasets:
-    is_synthetic = data in ["SF", "ER", "GRP"] or data.startswith("HY") or data.startswith("SF_")
-    
-    if is_synthetic:
-        fname_bet = "./datasets/graphs/"+data+"_data_bet.pickle"
-        if os.path.exists(fname_bet):
-            print(f"Skipping {data} (exists)")
-            continue
-        
-        if data.startswith("HY_") or data.startswith("SF_"):
-            try:
-                num_of_graphs = int(data.split("_")[1])
-            except:
+            # HY_N / SF_N: N from name. Bare "HY"/"SF"/"ER"/"GRP": 5.
+            if data.startswith("HY_") or data.startswith("SF_"):
+                try:
+                    num_of_graphs = int(data.split("_")[1])
+                except ValueError:
+                    num_of_graphs = 5
+            else:
                 num_of_graphs = 5
-        elif data == "HY":
-            num_of_graphs = 5
-        elif data == "HY_10":
-            num_of_graphs = 10
-        elif data == "HY_20":
-            num_of_graphs = 20
+
+            print("###################")
+            print(f"Generating synthetic graph type : {data}")
+            print(f"Number of graphs to be generated:{num_of_graphs}")
+            list_bet_data = list()
+            for i in range(num_of_graphs):
+                print(f"Graph index:{i+1}/{num_of_graphs}",end='\r')
+                g_nx = create_graph(data, i, args.num_nodes)
+
+                num_before = g_nx.number_of_nodes()
+                if nx.number_of_isolates(g_nx)>0:
+                    g_nx.remove_nodes_from(list(nx.isolates(g_nx)))
+                    g_nx = nx.convert_node_labels_to_integers(g_nx)
+
+                num_after = g_nx.number_of_nodes()
+                print(f" -> Nodes: {num_before} -> {num_after}")
+
+                g_nkit = nx2nkit(g_nx)
+                bet_dict = cal_exact_bet(g_nkit)
+                list_bet_data.append([g_nx,bet_dict])
+
+            with open(fname_bet,"wb") as fopen:
+                pickle.dump(list_bet_data,fopen)
+
+            print("")
+            print(f"{data} Graphs saved")
+
         else:
-            num_of_graphs = 5
-            
-        print("###################")
-        print(f"Generating synthetic graph type : {data}")
-        print(f"Number of graphs to be generated:{num_of_graphs}")
-        list_bet_data = list()
-        list_close_data = list()
-        print("Generating graphs and calculating centralities...")
-        for i in range(num_of_graphs):
-            print(f"Graph index:{i+1}/{num_of_graphs}",end='\r')
-            g_nx = create_graph(data, i)
-            
-            num_before = g_nx.number_of_nodes()
-            if nx.number_of_isolates(g_nx)>0:
-                #print("Graph has isolates.")
-                g_nx.remove_nodes_from(list(nx.isolates(g_nx)))
-                g_nx = nx.convert_node_labels_to_integers(g_nx)
-            
-            num_after = g_nx.number_of_nodes()
-            print(f" -> Nodes: {num_before} -> {num_after}")
+            fname_bet = os.path.join(output_dir, data + "_bet.pickle")
 
-            g_nkit = nx2nkit(g_nx)
-            bet_dict = cal_exact_bet(g_nkit)
-            close_dict = cal_exact_close(g_nkit)
-            list_bet_data.append([g_nx,bet_dict])
-            list_close_data.append([g_nx,close_dict])
+            if os.path.exists(fname_bet):
+                print(f"Skipping {data} (exists)")
+                continue
 
-        fname_bet = "./datasets/graphs/"+data+"_data_bet.pickle"    
-        fname_close = "./datasets/graphs/"+data+"_data_close.pickle"
+            input_path_raw = f"./datasets/raw/{data}.txt"
 
-        with open(fname_bet,"wb") as fopen:
-            pickle.dump(list_bet_data,fopen)
+            G = None
+            if os.path.exists(input_path_raw):
+                print(f"Processing {data} (raw)...")
+                G = load_real_data(input_path_raw)
+            else:
+                print(f"Warning: raw data for {data} not found in datasets/raw")
+                continue
 
-        with open(fname_close,"wb") as fopen1:
-            pickle.dump(list_close_data,fopen1)
-        print("")
-        print(f"{data} Graphs saved")
-        
-    else:
-        fname_bet = os.path.join(output_dir, data + "_bet.pickle")
-        if os.path.exists(fname_bet):
-            print(f"Skipping {data} (output exists at {fname_bet})")
-            continue
-
-        input_path = f"./datasets/real_graph/{data}.txt"
-        
-        if not os.path.exists(input_path):
-            print(f"Warning: Raw data for {data} not found at {input_path}")
-            continue
-
-        print(f"Processing {data}...")
-        
-        if data.startswith("road-"):
-            print(" -> Treating as Undirected (Road Network)")
-            G = load_real_data(input_path, is_undirected=True)
-            
-            if nx.number_of_isolates(G) > 0:
+            if nx.number_of_isolates(G)>0:
                 G.remove_nodes_from(list(nx.isolates(G)))
                 G = nx.convert_node_labels_to_integers(G)
-                
-            components = nx.strongly_connected_components(G)
-            for i, component in enumerate(components):
-                if i > 5: break 
-                pass
-        else:
-            print(" -> Treating as Directed")
-            G = load_real_data(input_path, is_undirected=False)
 
-        if nx.number_of_isolates(G) > 0:
-            G.remove_nodes_from(list(nx.isolates(G)))
-            G = nx.convert_node_labels_to_integers(G)
-        g_nkit = nx2nkit(G)
-        bet_dict = cal_exact_bet(g_nkit)
-        list_bet_data = [[G,bet_dict]]
-        with open(fname_bet,"wb") as fopen:
-            pickle.dump(list_bet_data,fopen)
-        print(f"{data} graph saved")
+            if data in UNDIRECTED_STORED_AS_DIGRAPH:
+                print(f"Symmetrizing {data} (declared_regime=undirected_stored_as_digraph)")
+                G = G.to_undirected().to_directed()
 
-print("End.")
+            g_nkit = nx2nkit(G)
+
+            print(f"Calculating Betweenness for {data}...")
+            bet_dict = cal_exact_bet(g_nkit)
+            list_bet_data = [[G,bet_dict]]
+            with open(fname_bet,"wb") as fopen:
+                pickle.dump(list_bet_data,fopen)
+            print(f"{data} bet saved")
+
+    print("End.")
+
+
+if __name__ == "__main__":
+    main()

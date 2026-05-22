@@ -1,19 +1,15 @@
-# Core requirements
-numpy<2.0.0
+numpy==2.2.0
 networkx==3.6
 scipy==1.16.3
-torch==2.2.2
-networkit==11.2
+networkit==11.2.1
 matplotlib==3.10.7
-# Below are optional, for running ABCDE baseline
-# gdown
-# fire
-# pytorch-lightning
-# torch-geometric
-# scikit-learn
-# python-igraph>=0.8.3
-# pandas>=1.1.0
-# tqdm>=4.54.1
-# aim>=2.1.4
-# knockknock>=0.1.8.1
-# wandb==0.23.0
+pandas>=1.1.0
+tqdm>=4.54.1
+scikit-learn
+
+# ABCDE baseline only
+pytorch-lightning
+torch-geometric
+python-igraph>=0.8.3
+gdown
+fire

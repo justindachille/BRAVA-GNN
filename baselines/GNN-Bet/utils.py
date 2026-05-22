@@ -272,45 +272,55 @@ def graph_to_adj_close(list_graph,list_n_sequence,list_node_num,model_size,print
 
 
 
-def ranking_correlation(y_out,true_val,node_num,model_size):
+def _topk_dict(predict_arr, true_arr, node_num):
+    accs = {}
+    for p in [0.01, 0.05, 0.1]:
+        k = max(1, int(node_num * p))
+        top_k_pred = np.argpartition(predict_arr, -k)[-k:]
+        top_k_true = np.argpartition(true_arr, -k)[-k:]
+        accs[p] = len(np.intersect1d(top_k_pred, top_k_true)) / k
+    return accs
+
+
+def ranking_correlation(y_out, true_val, node_num, model_size, compute_filtered=False):
     y_out = y_out.reshape((model_size))
     true_val = true_val.reshape(-1)
 
-    predict_arr = y_out.cpu().detach().numpy()
-    true_arr = true_val.cpu().detach().numpy()
+    predict_arr = y_out.cpu().detach().numpy()[:node_num]
+    true_arr = true_val.cpu().detach().numpy()[:node_num]
+
+    kt, _ = kendalltau(predict_arr, true_arr)
+    if not compute_filtered:
+        return kt
+    keep = true_arr > 0
+    if keep.sum() < 2:
+        return kt, float("nan")
+    kt_f, _ = kendalltau(predict_arr[keep], true_arr[keep])
+    return kt, kt_f
 
 
-    kt,_ = kendalltau(predict_arr[:node_num],true_arr[:node_num])
-
-    return kt
-
-
-def ranking_correlation_topk(y_out,true_val,node_num,model_size):
-    """
-    Returns Kendall-Tau and Top-K intersection accuracy for 1%, 5%, 10%.
-    Non-destructive alternative to ranking_correlation.
-    """
+def ranking_correlation_topk(y_out, true_val, node_num, model_size, compute_filtered=False):
+    """Returns Kendall-Tau and Top-K accuracy. With compute_filtered: also returns
+    KT and Top-K restricted to bc>0 nodes. Non-destructive alternative to ranking_correlation."""
     y_out = y_out.reshape(-1)
     true_val = true_val.reshape(-1)
 
     predict_arr = y_out.cpu().detach().numpy()[:node_num]
     true_arr = true_val.cpu().detach().numpy()[:node_num]
 
-    kt,_ = kendalltau(predict_arr, true_arr)
+    kt, _ = kendalltau(predict_arr, true_arr)
+    topk_accs = _topk_dict(predict_arr, true_arr, node_num)
 
-    topk_accs = {}
-    for p in [0.01, 0.05, 0.1]:
-        k = int(node_num * p)
-        if k < 1: k = 1
-        
-        top_k_pred = np.argpartition(predict_arr, -k)[-k:]
-        top_k_true = np.argpartition(true_arr, -k)[-k:]
-        
-        common = np.intersect1d(top_k_pred, top_k_true)
-        acc = len(common) / k
-        topk_accs[p] = acc
+    if not compute_filtered:
+        return kt, topk_accs
 
-    return kt, topk_accs
+    keep = true_arr > 0
+    n_keep = int(keep.sum())
+    if n_keep < 2:
+        return kt, topk_accs, float("nan"), {0.01: float("nan"), 0.05: float("nan"), 0.1: float("nan")}
+    kt_f, _ = kendalltau(predict_arr[keep], true_arr[keep])
+    topk_accs_f = _topk_dict(predict_arr[keep], true_arr[keep], n_keep)
+    return kt, topk_accs, kt_f, topk_accs_f
 
 
 def loss_cal(y_out,true_val,num_nodes,device,model_size):
