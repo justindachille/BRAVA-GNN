@@ -1,5 +1,6 @@
 # BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network
 <a href="https://arxiv.org/abs/2602.09716"><img src="https://img.shields.io/badge/arXiv-2602.09716-b31b1b.svg"></a>
+<a href="https://doi.org/10.1145/3799682.3840622"><img src="https://img.shields.io/badge/DOI-10.1145%2F3799682.3840622-blue.svg"></a>
 
 Official code implementation for BRAVA-GNN, a parameter-efficient GNN for approximating betweenness centrality with a 9.7% average improvement in Kendall–Tau correlation over the strongest baseline, while using 56× fewer parameters than the lightest competing GNN baseline and achieving up to a 44× speedup in inference time over the state-of-the-art.
 
@@ -86,13 +87,14 @@ python scripts/parse_results.py
 If you find BRAVA-GNN useful in your research, please cite our paper:
 
 ```bibtex
-@misc{dachille2026bravagnn,
+@inproceedings{dachille2026bravagnn,
       title={BRAVA-GNN: Betweenness Ranking Approximation Via Degree MAss Inspired Graph Neural Network},
       author={Justin Dachille and Aurora Rossi and Sunil Kumar Maurya and Frederik Mallmann-Trenn and Xin Liu and Frédéric Giroire and Tsuyoshi Murata and Emanuele Natale},
+      booktitle={Proceedings of the 35th ACM International Conference on Information and Knowledge Management (CIKM '26)},
       year={2026},
-      eprint={2602.09716},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2602.09716}
+      pages={},
+      publisher={ACM},
+      doi={10.1145/3799682.3840622},
+      url={https://doi.org/10.1145/3799682.3840622}
 }
 ```
